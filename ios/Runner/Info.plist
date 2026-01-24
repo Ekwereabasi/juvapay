@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<key>NSAppTransportSecurity</key>
+
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>$(DEVELOPMENT_LANGUAGE)</string>
+    <key>CFBundleDisplayName</key>
+    <string>JuvaPay</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleIdentifier</key>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>JuvaPay</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>$(FLUTTER_BUILD_NAME)</string>
+    <key>CFBundleSignature</key>
+    <string>????</string>
+    <key>CFBundleVersion</key>
+    <string>$(FLUTTER_BUILD_NUMBER)</string>
+    <key>LSRequiresIPhoneOS</key>
+    <true/>
+    <key>UILaunchStoryboardName</key>
+    <string>LaunchScreen</string>
+    <key>UIMainStoryboardFile</key>
+    <string>Main</string>
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+    <key>UISupportedInterfaceOrientations~ipad</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationPortraitUpsideDown</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+    <key>CADisableMinimumFrameDurationOnPhone</key>
+    <true/>
+    <key>UIApplicationSupportsIndirectInputEvents</key>
+    <true/>
+    
+    <!-- Photo Library Permissions (for saving images with gal package) -->
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>We need access to save images to your photo gallery</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>We need access to save images to your photo gallery</string>
+    
+    <!-- Optional: Camera permission (if your app will take photos) -->
+    <key>NSCameraUsageDescription</key>
+    <string>We need camera access to take photos for tasks</string>
+    
+    <!-- Optional: Microphone permission (if recording videos) -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>We need microphone access for video recording</string>
+    
+    <!-- Optional: Location permission (if showing user location) -->
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>We need location to show nearby tasks</string>
+    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+    <string>We need location to show nearby tasks</string>
+    
+    <!-- Background modes for notifications (if using push notifications) -->
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>fetch</string>
+        <string>remote-notification</string>
+    </array>
+    
+    <!-- For opening URLs (like app settings with url_launcher) -->
+    <key>LSApplicationQueriesSchemes</key>
+    <array>
+        <string>app-settings</string>
+    </array>
+
+	<!-- Add this for opening app settings -->
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>app-settings</string>
+	</array>
+      <key>NSAllowsArbitraryLoads</key>
+    <true/>
+
+    
+</dict>
+</plist>

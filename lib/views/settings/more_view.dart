@@ -1,3 +1,5 @@
+// more_view.dart - Updated to use the fixed MoreViewModel
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../view_models/more_view_model.dart';
@@ -23,15 +25,14 @@ class MoreView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Listen to theme changes from the parent/global provider
-    final themeService = Provider.of<ThemeService>(context);
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
     return ChangeNotifierProvider(
-      create: (_) => MoreViewModel(themeService),
-      child: Consumer2<MoreViewModel, ThemeService>(
-        builder: (context, viewModel, themeProvider, child) {
+      create: (context) =>
+          MoreViewModel(Provider.of<ThemeService>(context, listen: false)),
+      child: Consumer<MoreViewModel>(
+        builder: (context, viewModel, child) {
+          final theme = Theme.of(context);
+          final isDark = theme.brightness == Brightness.dark;
+
           return Scaffold(
             backgroundColor: theme.scaffoldBackgroundColor,
             appBar: AppBar(
@@ -51,154 +52,159 @@ class MoreView extends StatelessWidget {
                     bottom: 8,
                   ),
                   child: TextButton(
-                    onPressed:
-                        viewModel.isLoading
-                            ? null
-                            : () => viewModel.logout(context),
+                    onPressed: viewModel.isLoading ? null : () => viewModel.logout(context),
                     style: TextButton.styleFrom(
-                      backgroundColor:
-                          isDark
-                              ? Colors.red.withOpacity(0.2)
-                              : Colors.red.shade50,
-                      foregroundColor:
-                          isDark ? Colors.red.shade300 : Colors.red.shade600,
+                      backgroundColor: isDark
+                          ? Colors.red.withOpacity(0.2)
+                          : Colors.red.shade50,
+                      foregroundColor: isDark ? Colors.red.shade300 : Colors.red.shade600,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
                       ),
                     ),
-                    child:
-                        viewModel.isLoading
-                            ? const SizedBox(
-                              height: 16,
-                              width: 16,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                valueColor: AlwaysStoppedAnimation<Color>(
-                                  Colors.red,
-                                ),
+                    child: viewModel.isLoading
+                        ? const SizedBox(
+                            height: 16,
+                            width: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                Colors.red,
                               ),
-                            )
-                            : const Text(
-                              'Logout',
-                              style: TextStyle(fontWeight: FontWeight.bold),
                             ),
+                          )
+                        : const Text(
+                            'Logout',
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
                   ),
                 ),
               ],
             ),
-            body: SingleChildScrollView(
-              physics: const BouncingScrollPhysics(),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildProfileHeader(context, viewModel),
-                  Divider(height: 32, thickness: 1, color: theme.dividerColor),
+            body: RefreshIndicator(
+              onRefresh: () => viewModel.refreshProfile(),
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildProfileHeader(context, viewModel),
+                    Divider(height: 32, thickness: 1, color: theme.dividerColor),
 
-                  _buildSectionTitle(context, 'Account & Finance'),
-                  _buildListItem(
-                    context,
-                    icon: Icons.list_alt,
-                    title: 'My Orders',
-                    targetView: const OrderHistoryView(),
-                  ),
-                  _buildListItem(
-                    context,
-                    icon: Icons.account_balance_wallet_outlined,
-                    title: 'Fund Wallet',
-                    targetView: const FundWalletScreen(),
-                  ),
-                  _buildListItem(
-                    context,
-                    icon: Icons.account_balance_outlined,
-                    title: 'Place Withdrawals',
-                    targetView: const WithdrawView(),
-                  ),
-                  _buildListItem(
-                    context,
-                    icon: Icons.history,
-                    title: 'Transaction History',
-                    targetView: const TransactionHistoryPage(),
-                  ),
+                    _buildSectionTitle(context, 'Account & Finance'),
+                    _buildListItem(
+                      context,
+                      icon: Icons.list_alt,
+                      title: 'My Orders',
+                      targetView: const OrderHistoryView(),
+                    ),
+                    _buildListItem(
+                      context,
+                      icon: Icons.account_balance_wallet_outlined,
+                      title: 'Fund Wallet',
+                      targetView: const FundWalletScreen(),
+                    ),
+                    _buildListItem(
+                      context,
+                      icon: Icons.account_balance_outlined,
+                      title: 'Place Withdrawals',
+                      targetView: const WithdrawView(),
+                    ),
+                    _buildListItem(
+                      context,
+                      icon: Icons.history,
+                      title: 'Transaction History',
+                      targetView: const TransactionHistoryPage(),
+                    ),
 
-                  _buildListItem(
-                    context,
-                    icon: Icons.notifications_none,
-                    title: 'My Notifications',
-                    targetView: const NotificationsScreen(),
-                  ),
+                    _buildListItem(
+                      context,
+                      icon: Icons.notifications_none,
+                      title: 'My Notifications',
+                      targetView: const NotificationsScreen(),
+                    ),
 
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Divider(color: theme.dividerColor),
-                  ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Divider(color: theme.dividerColor),
+                    ),
 
-                  _buildSectionTitle(context, 'Profile & Security'),
-                  _buildListItem(
-                    context,
-                    icon: Icons.person_outline,
-                    title: 'Edit Profile',
-                    targetView: const EditProfileView(),
-                  ),
-                  _buildListItem(
-                    context,
-                    icon: Icons.lock_outline,
-                    title: 'Update Password',
-                    targetView: const UpdatePasswordView(),
-                  ),
-                  _buildListItem(
-                    context,
-                    icon: Icons.location_on_outlined,
-                    title: 'Update Location',
-                    targetView: const UpdateLocationScreen(),
-                  ),
-                  _buildListItem(
-                    context,
-                    icon: Icons.credit_card_outlined,
-                    title: 'Update Bank Details',
-                    targetView: const UpdateBankDetailsPage(),
-                  ),
+                    _buildSectionTitle(context, 'Profile & Security'),
+                    _buildListItem(
+                      context,
+                      icon: Icons.person_outline,
+                      title: 'Edit Profile',
+                      targetView: const EditProfileView(),
+                    ),
+                    _buildListItem(
+                      context,
+                      icon: Icons.lock_outline,
+                      title: 'Update Password',
+                      targetView: const UpdatePasswordView(),
+                    ),
+                    _buildListItem(
+                      context,
+                      icon: Icons.location_on_outlined,
+                      title: 'Update Location',
+                      targetView: const UpdateLocationScreen(),
+                    ),
+                    _buildListItem(
+                      context,
+                      icon: Icons.credit_card_outlined,
+                      title: 'Update Bank Details',
+                      targetView: const BankAccountScreen(),
+                    ),
 
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Divider(color: theme.dividerColor),
-                  ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Divider(color: theme.dividerColor),
+                    ),
 
-                  _buildSectionTitle(context, 'Appearance & Support'),
-                  _buildThemeToggle(context, themeProvider),
-                  _buildListItem(
-                    context,
-                    icon: Icons.support_agent,
-                    title: 'Chat With Support',
-                    targetView: const SupportPage(),
-                  ),
+                    _buildSectionTitle(context, 'Appearance & Support'),
+                    _buildThemeToggle(context, viewModel),
+                    _buildListItem(
+                      context,
+                      icon: Icons.support_agent,
+                      title: 'Chat With Support',
+                      targetView: const SupportPage(),
+                    ),
 
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Divider(color: theme.dividerColor),
-                  ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Divider(color: theme.dividerColor),
+                    ),
 
-                  _buildSectionTitle(context, 'Legal & Information'),
-                  _buildListItem(
-                    context,
-                    icon: Icons.security_outlined,
-                    title: 'Privacy Policy',
-                    targetView: const PrivacyPolicyView(),
-                  ),
-                  _buildListItem(
-                    context,
-                    icon: Icons.info_outline,
-                    title: 'About JuvaPay',
-                    targetView: const AboutView(),
-                  ),
-                  _buildListItem(
-                    context,
-                    icon: Icons.description_outlined,
-                    title: 'Terms of Use',
-                    targetView: const TermsOfUseView(),
-                  ),
+                    _buildSectionTitle(context, 'Legal & Information'),
+                    _buildListItem(
+                      context,
+                      icon: Icons.security_outlined,
+                      title: 'Privacy Policy',
+                      targetView: const PrivacyPolicyView(),
+                    ),
+                    _buildListItem(
+                      context,
+                      icon: Icons.info_outline,
+                      title: 'About JuvaPay',
+                      targetView: const AboutView(),
+                    ),
+                    _buildListItem(
+                      context,
+                      icon: Icons.description_outlined,
+                      title: 'Terms of Use',
+                      targetView: const TermsOfUseView(),
+                    ),
 
-                  const SizedBox(height: 40),
-                ],
+                    // Add membership status if applicable
+                    if (viewModel.isMember)
+                      _buildMembershipStatus(context, viewModel),
+
+                    // Add profile completion indicator if profile is incomplete
+                    if (viewModel.profileCompletionPercentage < 1.0)
+                      _buildProfileCompletionIndicator(context, viewModel),
+
+                    const SizedBox(height: 40),
+                  ],
+                ),
               ),
             ),
           );
@@ -211,72 +217,198 @@ class MoreView extends StatelessWidget {
 
   Widget _buildProfileHeader(BuildContext context, MoreViewModel viewModel) {
     final theme = Theme.of(context);
+    final isProfileComplete = viewModel.isProfileComplete;
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          CircleAvatar(
-            radius: 35,
-            backgroundColor: theme.primaryColor.withOpacity(0.1),
-            backgroundImage:
-                (viewModel.profileUrl != null &&
-                        viewModel.profileUrl!.isNotEmpty)
-                    ? NetworkImage(viewModel.profileUrl!)
-                    : null,
-            child:
-                (viewModel.profileUrl == null || viewModel.profileUrl!.isEmpty)
-                    ? Text(
-                      viewModel.fullName.isNotEmpty
-                          ? viewModel.fullName[0].toUpperCase()
-                          : 'U',
-                      style: TextStyle(
-                        color: theme.primaryColor,
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    )
-                    : null,
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  viewModel.fullName,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
+          Row(
+            children: [
+              Stack(
+                children: [
+                  CircleAvatar(
+                    radius: 35,
+                    backgroundColor: theme.primaryColor.withOpacity(0.1),
+                    backgroundImage: (viewModel.profileUrl != null &&
+                            viewModel.profileUrl!.isNotEmpty)
+                        ? NetworkImage(viewModel.profileUrl!)
+                        : null,
+                    child: (viewModel.profileUrl == null ||
+                            viewModel.profileUrl!.isEmpty)
+                        ? Text(
+                            viewModel.fullName.isNotEmpty
+                                ? viewModel.fullName[0].toUpperCase()
+                                : 'U',
+                            style: TextStyle(
+                              color: theme.primaryColor,
+                              fontSize: 24,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          )
+                        : null,
                   ),
-                ),
-                Text(
-                  '@${viewModel.username}',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: theme.textTheme.bodySmall?.color,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                GestureDetector(
-                  onTap:
-                      () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const EditProfileView(),
+                  if (!isProfileComplete)
+                    Positioned(
+                      bottom: 0,
+                      right: 0,
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: Colors.orange,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 2),
+                        ),
+                        child: const Icon(
+                          Icons.warning_amber,
+                          color: Colors.white,
+                          size: 16,
                         ),
                       ),
-                  child: Text(
-                    'Edit Profile Settings',
-                    style: TextStyle(
-                      color: theme.primaryColor,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13,
+                    ),
+                ],
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      viewModel.fullName,
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Text(
+                      '@${viewModel.username}',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: theme.textTheme.bodySmall?.color,
+                      ),
+                    ),
+                    Text(
+                      viewModel.email,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: theme.textTheme.bodySmall?.color?.withOpacity(0.7),
+                      ),
+                    ),
+                    if (viewModel.isMember)
+                      const Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(
+                          'Premium Member',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.green,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    if (!isProfileComplete)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(
+                          'Complete your profile',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.orange,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const EditProfileView(),
                     ),
                   ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: theme.primaryColor,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  child: const Text(
+                    'Edit Profile Settings',
+                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                  ),
                 ),
-              ],
-            ),
+              ),
+              IconButton(
+                onPressed: () {
+                  // Refresh profile data
+                  viewModel.refreshProfile();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: const Text('Profile refreshed'),
+                      backgroundColor: theme.primaryColor,
+                    ),
+                  );
+                },
+                icon: Icon(Icons.refresh, color: theme.primaryColor),
+                tooltip: 'Refresh profile',
+              ),
+            ],
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildMembershipStatus(BuildContext context, MoreViewModel viewModel) {
+    final theme = Theme.of(context);
+    
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.green.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.green.withOpacity(0.3)),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.verified_user, color: Colors.green, size: 24),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Premium Member',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                      color: Colors.green.shade800,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'You have access to all earning features',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.green.shade700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -318,17 +450,13 @@ class MoreView extends StatelessWidget {
         size: 14,
         color: theme.disabledColor,
       ),
-      onTap:
-          () => Navigator.of(
-            context,
-          ).push(MaterialPageRoute(builder: (_) => targetView)),
+      onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => targetView)),
     );
   }
 
-  // 🟢 UPDATED: Much cleaner dropdown logic ensuring clicks work
-  Widget _buildThemeToggle(BuildContext context, ThemeService themeService) {
+  Widget _buildThemeToggle(BuildContext context, MoreViewModel viewModel) {
     final theme = Theme.of(context);
-    final currentTheme = themeService.themeMode;
+    final currentTheme = viewModel.themeMode;
 
     // Get icon based on current theme
     IconData getThemeIcon() {
@@ -352,7 +480,6 @@ class MoreView extends StatelessWidget {
           color: theme.textTheme.bodyLarge?.color,
         ),
       ),
-      // Simplified trailing widget for better hit testing
       trailing: Container(
         height: 36,
         padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -381,7 +508,7 @@ class MoreView extends StatelessWidget {
             ),
             onChanged: (ThemeMode? newMode) {
               if (newMode != null) {
-                themeService.setThemeMode(newMode);
+                viewModel.setThemeMode(newMode);
               }
             },
             items: const [
@@ -390,6 +517,91 @@ class MoreView extends StatelessWidget {
               DropdownMenuItem(value: ThemeMode.dark, child: Text('Dark')),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildProfileCompletionIndicator(
+    BuildContext context,
+    MoreViewModel viewModel,
+  ) {
+    final theme = Theme.of(context);
+    final percentage = viewModel.profileCompletionPercentage;
+
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: theme.cardColor,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: theme.dividerColor.withOpacity(0.3)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Profile Completion',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                    color: theme.textTheme.bodyLarge?.color,
+                  ),
+                ),
+                Text(
+                  '${(percentage * 100).toInt()}%',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                    color: theme.primaryColor,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            LinearProgressIndicator(
+              value: percentage,
+              backgroundColor: theme.dividerColor.withOpacity(0.1),
+              valueColor: AlwaysStoppedAnimation<Color>(
+                percentage == 1.0 ? Colors.green : theme.primaryColor,
+              ),
+              minHeight: 6,
+              borderRadius: BorderRadius.circular(3),
+            ),
+            const SizedBox(height: 8),
+            if (percentage < 1.0)
+              Text(
+                'Complete your profile to unlock all features',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: theme.textTheme.bodySmall?.color,
+                ),
+              ),
+            if (percentage < 1.0)
+              TextButton(
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const EditProfileView(),
+                  ),
+                ),
+                style: TextButton.styleFrom(
+                  padding: EdgeInsets.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: Text(
+                  'Complete Profile →',
+                  style: TextStyle(
+                    color: theme.primaryColor,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
     );

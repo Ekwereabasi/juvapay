@@ -6,7 +6,7 @@ import 'package:juvapay/utils/platform_helper.dart';
 import 'upload_proof_screen.dart';
 
 class TaskExecutionScreen extends StatefulWidget {
-  final Map<String, dynamic> taskData;
+  final Map<String, dynamic> taskData; // Updated to use new task structure
 
   const TaskExecutionScreen({super.key, required this.taskData});
 
@@ -17,40 +17,45 @@ class TaskExecutionScreen extends StatefulWidget {
 class _TaskExecutionScreenState extends State<TaskExecutionScreen> {
   final SupabaseAuthService _authService = SupabaseAuthService();
   Timer? _timer;
-  Duration _timeLeft = const Duration(hours: 1);
+  Duration _timeLeft = const Duration(
+    hours: 24,
+  ); // Default 24 hours for new system
   bool _isLoading = false;
-
-  // --- CONSTANTS & CONFIGURATION ---
-  static const _defaultPlatform = 'facebook';
-  static const _buttonPadding = EdgeInsets.symmetric(
-    horizontal: 40,
-    vertical: 12,
-  );
-  static const _sectionSpacing = 20.0;
-  static const _timerUpdateInterval = Duration(seconds: 1);
-  static const _taskDuration = Duration(hours: 1);
+  String? _assignmentId;
+  String? _queueId;
 
   @override
   void initState() {
     super.initState();
+    _initializeTaskData();
     _initializeTimer();
   }
 
-  void _initializeTimer() {
-    // Calculate remaining time from task data if available
-    if (widget.taskData.containsKey('time_remaining')) {
-      final seconds = widget.taskData['time_remaining'] as int;
-      _timeLeft = Duration(seconds: seconds);
-    } else {
-      _timeLeft = _taskDuration;
-    }
+  void _initializeTaskData() {
+    // Extract data from new task structure
+    _assignmentId = widget.taskData['assignment_id']?.toString();
+    _queueId = widget.taskData['queue_id']?.toString();
 
+    // Set time based on task requirements
+    if (widget.taskData.containsKey('expires_at')) {
+      final expiresAt = DateTime.parse(widget.taskData['expires_at']);
+      final now = DateTime.now();
+      if (expiresAt.isAfter(now)) {
+        _timeLeft = expiresAt.difference(now);
+      }
+    } else if (widget.taskData.containsKey('estimated_time')) {
+      final minutes = widget.taskData['estimated_time'] as int? ?? 1440;
+      _timeLeft = Duration(minutes: minutes);
+    }
+  }
+
+  void _initializeTimer() {
     _startTimer();
   }
 
   void _startTimer() {
     _timer?.cancel();
-    _timer = Timer.periodic(_timerUpdateInterval, _updateTimer);
+    _timer = Timer.periodic(const Duration(seconds: 1), _updateTimer);
   }
 
   void _updateTimer(Timer timer) {
@@ -61,7 +66,7 @@ class _TaskExecutionScreenState extends State<TaskExecutionScreen> {
 
     setState(() {
       if (_timeLeft.inSeconds > 0) {
-        _timeLeft = _timeLeft - _timerUpdateInterval;
+        _timeLeft = _timeLeft - const Duration(seconds: 1);
       } else {
         timer.cancel();
         _onTimeExpired();
@@ -81,9 +86,9 @@ class _TaskExecutionScreenState extends State<TaskExecutionScreen> {
   }
 
   Future<void> _visitLink() async {
-    final String? link = widget.taskData['ad_link'];
+    final String? link = widget.taskData['target_link'];
     if (link == null || link.isEmpty) {
-      _showSnackBar("Invalid task link", isError: true);
+      _showSnackBar("No link provided for this task", isError: true);
       return;
     }
 
@@ -129,7 +134,8 @@ class _TaskExecutionScreenState extends State<TaskExecutionScreen> {
     setState(() => _isLoading = true);
 
     try {
-      await _authService.cancelTask(widget.taskData['task_id']);
+      // TODO: Implement cancel task in new system
+      // await _authService.cancelTask(widget.taskData['assignment_id']);
 
       if (mounted) {
         _showSnackBar("Task cancelled successfully");
@@ -198,11 +204,19 @@ class _TaskExecutionScreenState extends State<TaskExecutionScreen> {
   }
 
   void _navigateToUploadProof() {
+    if (_assignmentId == null) {
+      _showSnackBar("Task assignment ID is missing", isError: true);
+      return;
+    }
+
     Navigator.push(
       context,
       MaterialPageRoute(
         builder:
-            (context) => UploadProofScreen(taskId: widget.taskData['task_id']),
+            (context) => UploadProofScreen(
+              assignmentId: _assignmentId!,
+              taskData: widget.taskData,
+            ),
       ),
     );
   }
@@ -220,41 +234,40 @@ class _TaskExecutionScreenState extends State<TaskExecutionScreen> {
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
-      appBar: _buildAppBar(theme),
+      appBar: AppBar(
+        title: Text(
+          "Perform Task",
+          style: Theme.of(
+            context,
+          ).appBarTheme.titleTextStyle?.copyWith(fontWeight: FontWeight.w600),
+        ),
+        backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
+        elevation: Theme.of(context).appBarTheme.elevation ?? 0,
+        leading: IconButton(
+          icon: Icon(
+            Icons.arrow_back_ios_new_rounded,
+            color: Theme.of(context).appBarTheme.iconTheme?.color,
+            size: 20,
+          ),
+          onPressed: () => Navigator.pop(context),
+        ),
+        iconTheme: Theme.of(context).appBarTheme.iconTheme,
+        actionsIconTheme: Theme.of(context).appBarTheme.actionsIconTheme,
+      ),
       body: _buildBody(theme, isDark),
-    );
-  }
-
-  AppBar _buildAppBar(ThemeData theme) {
-    return AppBar(
-      title: Text(
-        "Perform Task",
-        style: theme.appBarTheme.titleTextStyle?.copyWith(
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-      backgroundColor: theme.scaffoldBackgroundColor,
-      elevation: 0,
-      leading: IconButton(
-        icon: Icon(
-          Icons.arrow_back_ios_new_rounded,
-          color: theme.iconTheme.color,
-          size: 20,
-        ),
-        onPressed: () => Navigator.pop(context),
-      ),
     );
   }
 
   Widget _buildBody(ThemeData theme, bool isDark) {
     final platformName =
-        widget.taskData['platform']?.toString().toLowerCase() ??
-        _defaultPlatform;
+        widget.taskData['platform']?.toString().toLowerCase() ?? 'facebook';
     final platformDisplayName = PlatformHelper.getPlatformDisplayName(
       platformName,
     );
     final platformColor = PlatformHelper.getPlatformColor(platformName);
     final platformIcon = PlatformHelper.getPlatformIcon(platformName);
+    final payoutAmount = widget.taskData['payout_amount'] ?? 0.0;
+    final taskTitle = widget.taskData['task_title'] ?? 'Social Media Task';
 
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
@@ -263,17 +276,19 @@ class _TaskExecutionScreenState extends State<TaskExecutionScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _buildTimerSection(theme),
-          SizedBox(height: _sectionSpacing),
+          SizedBox(height: 20),
           _buildPlatformHeader(
             platformName: platformName,
             platformDisplayName: platformDisplayName,
             platformColor: platformColor,
             platformIcon: platformIcon,
             isDark: isDark,
+            payoutAmount: payoutAmount,
+            taskTitle: taskTitle,
           ),
-          SizedBox(height: _sectionSpacing),
+          SizedBox(height: 20),
           _buildInstructionsSection(theme, platformDisplayName),
-          SizedBox(height: _sectionSpacing * 1.5),
+          SizedBox(height: 30),
           _buildActionButtons(theme),
         ],
       ),
@@ -307,6 +322,14 @@ class _TaskExecutionScreenState extends State<TaskExecutionScreen> {
               ),
             ),
           ),
+          const SizedBox(width: 12),
+          Text(
+            'remaining',
+            style: TextStyle(
+              color: theme.colorScheme.error.withOpacity(0.8),
+              fontSize: 14,
+            ),
+          ),
         ],
       ),
     );
@@ -318,8 +341,9 @@ class _TaskExecutionScreenState extends State<TaskExecutionScreen> {
     required Color platformColor,
     required IconData platformIcon,
     required bool isDark,
+    required double payoutAmount,
+    required String taskTitle,
   }) {
-    // Adjust icon color for dark mode on certain platforms
     final iconColor =
         (platformName == 'tiktok' && isDark) ? Colors.black : Colors.white;
 
@@ -344,35 +368,53 @@ class _TaskExecutionScreenState extends State<TaskExecutionScreen> {
         ),
         const SizedBox(height: 16),
         Text(
-          "$platformDisplayName Advert Task",
+          taskTitle,
           style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
           textAlign: TextAlign.center,
         ),
-        const SizedBox(height: 12),
-        ElevatedButton.icon(
-          onPressed: _isLoading ? null : _visitLink,
-          icon: Icon(
-            Icons.link,
-            color: _isLoading ? Colors.grey : Colors.black,
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.green.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Colors.green.withOpacity(0.3)),
           ),
-          label: Text(
-            _isLoading ? "LOADING..." : "VISIT LINK",
-            style: TextStyle(
-              color: _isLoading ? Colors.grey : Colors.black,
-              fontWeight: FontWeight.w700,
-              fontSize: 14,
+          child: Text(
+            'Earn ₦${payoutAmount.toStringAsFixed(2)}',
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: Colors.green,
             ),
-          ),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFFFFD700),
-            padding: _buttonPadding,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(30),
-            ),
-            elevation: 2,
-            shadowColor: Colors.black.withOpacity(0.2),
           ),
         ),
+        const SizedBox(height: 12),
+        if (widget.taskData['target_link'] != null)
+          ElevatedButton.icon(
+            onPressed: _isLoading ? null : _visitLink,
+            icon: Icon(
+              Icons.link,
+              color: _isLoading ? Colors.grey : Colors.black,
+            ),
+            label: Text(
+              _isLoading ? "LOADING..." : "VISIT TASK LINK",
+              style: TextStyle(
+                color: _isLoading ? Colors.grey : Colors.black,
+                fontWeight: FontWeight.w700,
+                fontSize: 14,
+              ),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFFD700),
+              padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(30),
+              ),
+              elevation: 2,
+              shadowColor: Colors.black.withOpacity(0.2),
+            ),
+          ),
       ],
     );
   }
@@ -381,28 +423,64 @@ class _TaskExecutionScreenState extends State<TaskExecutionScreen> {
     ThemeData theme,
     String platformDisplayName,
   ) {
-    final instructions = [
-      "Click the 'Visit Link' button above.",
-      "Complete the task on $platformDisplayName.",
-      "Take a screenshot showing proof of completion.",
+    final instructions = widget.taskData['instructions'] as List<dynamic>?;
+    final adContent = widget.taskData['ad_content']?.toString();
+    final targetUsername = widget.taskData['target_username']?.toString();
+
+    List<String> defaultInstructions = [
+      "Click the 'Visit Task Link' button above to access the content.",
+      "Complete the task on $platformDisplayName as instructed.",
+      "Take a clear screenshot showing proof of completion.",
       "Click the button below to upload your proof.",
     ];
+
+    final displayInstructions =
+        instructions?.map((e) => e.toString()).toList() ?? defaultInstructions;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Divider(),
-        SizedBox(height: _sectionSpacing),
+        SizedBox(height: 20),
         Text(
           "Task Instructions:",
           style: theme.textTheme.titleMedium?.copyWith(
             fontWeight: FontWeight.w600,
           ),
         ),
-        SizedBox(height: _sectionSpacing),
-        ...instructions.asMap().entries.map(
+        SizedBox(height: 20),
+        ...displayInstructions.asMap().entries.map(
           (entry) => _buildStep(entry.key + 1, entry.value, theme),
         ),
+        if (adContent != null && adContent.isNotEmpty) ...[
+          SizedBox(height: 20),
+          Text(
+            "Ad Content:",
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: theme.cardColor,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: theme.dividerColor),
+            ),
+            child: Text(adContent, style: theme.textTheme.bodyMedium),
+          ),
+        ],
+        if (targetUsername != null && targetUsername.isNotEmpty) ...[
+          SizedBox(height: 12),
+          Text(
+            "Target: $targetUsername",
+            style: TextStyle(
+              color: theme.primaryColor,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
       ],
     );
   }

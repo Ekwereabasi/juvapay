@@ -1,4 +1,4 @@
-// wallet_service.dart
+// wallet_service.dart - COMPLETE VERSION
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
@@ -359,18 +359,77 @@ class DashboardStats {
 // ==========================================
 
 class WalletService {
-  static final WalletService _instance = WalletService._internal();
-  factory WalletService() => _instance;
-  WalletService._internal();
-
   final SupabaseClient _supabase = Supabase.instance.client;
-
+  StreamSubscription? _walletSubscription;
+  
   // Flutterwave Configuration
   static const String _flutterwaveBaseUrl = 'https://api.flutterwave.com/v3';
   static const String _flutterwaveSecretKey = 'YOUR_FLUTTERWAVE_SECRET_KEY';
 
   // ==========================================
-  // 1. WALLET OPERATIONS
+  // 1. REAL-TIME WALLET STREAMS
+  // ==========================================
+
+  // Stream for real-time wallet updates (returns simple map)
+  Stream<Map<String, dynamic>> getWalletStream() {
+    final user = _supabase.auth.currentUser;
+    if (user == null) {
+      throw Exception('User not authenticated');
+    }
+    
+    return _supabase
+        .from('wallets')
+        .stream(primaryKey: ['user_id'])
+        .eq('user_id', user.id)
+        .map((snapshot) {
+          if (snapshot.isEmpty) return {
+            'current_balance': 0.0, 
+            'available_balance': 0.0,
+            'locked_balance': 0.0
+          };
+          final data = snapshot.first;
+          return {
+            'current_balance': (data['current_balance'] as num).toDouble(),
+            'available_balance': (data['available_balance'] as num).toDouble(),
+            'locked_balance': (data['locked_balance'] as num).toDouble(),
+          };
+        });
+  }
+
+  // Alternative method that returns Stream<Wallet>
+  Stream<Wallet> watchWallet() {
+    final user = _supabase.auth.currentUser;
+    if (user == null) return const Stream.empty();
+
+    return _supabase
+        .from('wallets')
+        .stream(primaryKey: ['user_id'])
+        .eq('user_id', user.id)
+        .asyncMap((snapshot) async {
+          if (snapshot.isEmpty) {
+            return await getWallet();
+          }
+          return Wallet.fromJson(snapshot.first);
+        });
+  }
+
+  Stream<List<Transaction>> watchRecentTransactions({int limit = 10}) {
+    final user = _supabase.auth.currentUser;
+    if (user == null) return const Stream.empty();
+
+    return _supabase
+        .from('financial_transactions')
+        .stream(primaryKey: ['id'])
+        .eq('user_id', user.id)
+        .order('created_at', ascending: false)
+        .limit(limit)
+        .map((snapshot) {
+          return snapshot.map((data) => Transaction.fromJson(data)).toList();
+        });
+  }
+
+  // ==========================================
+  // 2. WALLET OPERATIONS
   // ==========================================
 
   Future<Wallet> getWallet() async {
@@ -429,7 +488,99 @@ class WalletService {
   }
 
   // ==========================================
-  // 2. DEPOSIT OPERATIONS
+  // 3. ADVERT SUBSCRIPTION METHODS
+  // ==========================================
+
+  // Check advert subscription status
+  Future<Map<String, dynamic>> checkAdvertSubscription() async {
+    try {
+      final user = _supabase.auth.currentUser;
+      if (user == null) throw Exception('User not authenticated');
+      
+      final response = await _supabase
+          .from('active_advert_subscriptions')
+          .select()
+          .eq('user_id', user.id)
+          .maybeSingle();
+      
+      if (response == null) {
+        return {'has_subscription': false, 'is_active': false};
+      }
+      
+      return {
+        'has_subscription': true,
+        'is_active': response['is_active'] == true,
+        'latest_expiry': response['latest_expiry'],
+      };
+    } catch (e) {
+      debugPrint('Error checking advert subscription: $e');
+      return {'has_subscription': false, 'is_active': false};
+    }
+  }
+  
+  // Process advert payment
+  Future<Map<String, dynamic>> processAdvertPayment() async {
+    try {
+      final user = _supabase.auth.currentUser;
+      if (user == null) throw Exception('User not authenticated');
+      
+      // First check balance
+      final balanceCheck = await checkBalance(1000.0);
+      
+      if (balanceCheck['hasSufficientBalance'] != true) {
+        return {
+          'success': false,
+          'message': 'Insufficient balance',
+          'available_balance': balanceCheck['availableBalance'],
+        };
+      }
+      
+      // Process advert fee payment using the existing processPayment method
+      final result = await processPayment(
+        amount: 1000.0,
+        transactionType: 'ADVERT_FEE',
+        description: 'Advert subscription for 30 days',
+        metadata: {
+          'advert_type': 'monthly_subscription',
+          'duration_days': 30,
+          'auto_renew': true,
+        },
+      );
+      
+      if (result['success'] == true) {
+        // Create advert subscription record
+        await _supabase.from('advert_subscriptions').insert({
+          'user_id': user.id,
+          'start_date': DateTime.now().toIso8601String(),
+          'end_date': DateTime.now().add(Duration(days: 30)).toIso8601String(),
+          'amount_paid': 1000.0,
+          'payment_ref': result['transactionId'],
+        });
+        
+        return {
+          'success': true,
+          'message': 'Advert subscription activated',
+          'subscription_id': result['transactionId'],
+          'current_balance': result['currentBalance'],
+          'available_balance': result['availableBalance'],
+        };
+      }
+      
+      return {
+        'success': false,
+        'message': result['message'] ?? 'Payment failed',
+      };
+    } catch (e) {
+      debugPrint('Error processing advert payment: $e');
+      return {
+        'success': false,
+        'message': 'Payment failed: $e',
+      };
+    }
+  }
+
+  // ==========================================
+  // 4. DEPOSIT OPERATIONS
   // ==========================================
 
   Future<Map<String, dynamic>> processDeposit({
@@ -581,7 +732,7 @@ class WalletService {
   }
 
   // ==========================================
-  // 3. WITHDRAWAL OPERATIONS
+  // 5. WITHDRAWAL OPERATIONS
   // ==========================================
 
   Future<Map<String, dynamic>> processWithdrawal({
@@ -632,7 +783,7 @@ class WalletService {
   }
 
   // ==========================================
-  // 4. PAYMENT OPERATIONS
+  // 6. PAYMENT OPERATIONS
   // ==========================================
 
   Future<Map<String, dynamic>> processPayment({
@@ -695,7 +846,7 @@ class WalletService {
   }
 
   // ==========================================
-  // 5. TRANSFER OPERATIONS
+  // 7. TRANSFER OPERATIONS
   // ==========================================
 
   Future<Map<String, dynamic>> transferBetweenWallets({
@@ -750,7 +901,7 @@ class WalletService {
   }
 
   // ==========================================
-  // 6. REFUND OPERATIONS
+  // 8. REFUND OPERATIONS
   // ==========================================
 
   Future<Map<String, dynamic>> processRefund({
@@ -795,7 +946,7 @@ class WalletService {
   }
 
   // ==========================================
-  // 7. TRANSACTION HISTORY (FIXED QUERY BUILDER)
+  // 9. TRANSACTION HISTORY
   // ==========================================
 
   Future<List<Transaction>> getTransactionHistory({
@@ -849,62 +1000,6 @@ class WalletService {
       return transactions;
     } catch (e) {
       debugPrint('Error getting transaction history: $e');
-      return [];
-    }
-  }
-
-  // Alternative method using multiple OR conditions
-  Future<List<Transaction>> getTransactionHistoryAlt({
-    List<String>? types,
-    String? status,
-    DateTime? startDate,
-    DateTime? endDate,
-    int limit = 50,
-    int offset = 0,
-  }) async {
-    final user = _supabase.auth.currentUser;
-    if (user == null) return [];
-
-    try {
-      // Build query with manual OR conditions
-      String? filter = null;
-      
-      if (types != null && types.isNotEmpty) {
-        final typeFilters = types.map((type) => 'transaction_type.eq.$type').join(',');
-        filter = typeFilters;
-      }
-
-      var query = _supabase
-          .from('financial_transactions')
-          .select('*')
-          .eq('user_id', user.id);
-
-      if (filter != null) {
-        query = query.or(filter);
-      }
-
-      if (status != null && status.isNotEmpty) {
-        query = query.eq('status', status);
-      }
-
-      if (startDate != null) {
-        query = query.gte('created_at', startDate.toIso8601String());
-      }
-
-      if (endDate != null) {
-        query = query.lte('created_at', endDate.toIso8601String());
-      }
-
-      final response = await query
-          .order('created_at', ascending: false)
-          .range(offset, offset + limit - 1)
-          .timeout(const Duration(seconds: 10));
-
-      return (response as List)
-          .map((item) => Transaction.fromJson(item))
-          .toList();
-    } catch (e) {
-      debugPrint('Error getting transaction history (alt): $e');
       return [];
     }
   }
@@ -1029,7 +1124,7 @@ class WalletService {
   }
 
   // ==========================================
-  // 8. WALLET SECURITY
+  // 10. WALLET SECURITY
   // ==========================================
 
   Future<Map<String, dynamic>> lockWallet({
@@ -1096,7 +1191,7 @@ class WalletService {
   }
 
   // ==========================================
-  // 9. SYSTEM HEALTH
+  // 11. SYSTEM HEALTH
   // ==========================================
 
   Future<Map<String, dynamic>> getSystemHealth() async {
@@ -1125,7 +1220,7 @@ class WalletService {
   }
 
   // ==========================================
-  // 10. UTILITY METHODS
+  // 12. UTILITY METHODS
   // ==========================================
 
   Future<void> cancelTransaction({
@@ -1146,37 +1241,6 @@ class WalletService {
       debugPrint('Error cancelling transaction: $e');
       rethrow;
     }
-  }
-
-  Stream<Wallet> watchWallet() {
-    final user = _supabase.auth.currentUser;
-    if (user == null) return const Stream.empty();
-
-    return _supabase
-        .from('wallets')
-        .stream(primaryKey: ['user_id'])
-        .eq('user_id', user.id)
-        .asyncMap((snapshot) async {
-          if (snapshot.isEmpty) {
-            return await getWallet();
-          }
-          return Wallet.fromJson(snapshot.first);
-        });
-  }
-
-  Stream<List<Transaction>> watchRecentTransactions({int limit = 10}) {
-    final user = _supabase.auth.currentUser;
-    if (user == null) return const Stream.empty();
-
-    return _supabase
-        .from('financial_transactions')
-        .stream(primaryKey: ['id'])
-        .eq('user_id', user.id)
-        .order('created_at', ascending: false)
-        .limit(limit)
-        .map((snapshot) {
-          return snapshot.map((data) => Transaction.fromJson(data)).toList();
-        });
   }
 
   // Helper method to format transaction type for display
@@ -1235,5 +1299,10 @@ class WalletService {
       default:
         return Icons.account_balance_wallet_outlined;
     }
+  }
+
+  // Clean up subscription
+  void dispose() {
+    _walletSubscription?.cancel();
   }
 }

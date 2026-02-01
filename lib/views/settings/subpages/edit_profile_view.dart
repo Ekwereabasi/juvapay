@@ -1,7 +1,10 @@
+// edit_profile_view.dart - FIXED VERSION (No White Screen)
+
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:provider/provider.dart';
+import '../../../view_models/more_view_model.dart';
 import '../../../services/supabase_auth_service.dart';
 
 class EditProfileView extends StatefulWidget {
@@ -12,15 +15,13 @@ class EditProfileView extends StatefulWidget {
 }
 
 class _EditProfileViewState extends State<EditProfileView> {
-  final SupabaseAuthService _authService = SupabaseAuthService();
   final ImagePicker _picker = ImagePicker();
-  bool _isLoading = false;
+  final SupabaseAuthService _authService = SupabaseAuthService();
   File? _imageFile;
 
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _bioController = TextEditingController();
   final TextEditingController _usernameController = TextEditingController();
-  final TextEditingController _emailController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
 
   String? _selectedGender;
@@ -29,9 +30,9 @@ class _EditProfileViewState extends State<EditProfileView> {
   String? _selectedMonth;
   int? _selectedYear;
 
+  bool _isLoading = true;
   String? _currentProfileUrl;
-  int? _selectedStateId;
-  int? _selectedLgaId;
+  String _email = '';
 
   final List<String> _months = [
     'January',
@@ -59,11 +60,9 @@ class _EditProfileViewState extends State<EditProfileView> {
   @override
   void initState() {
     super.initState();
-    _loadProfileData();
-    _nameController.addListener(() => setState(() {}));
-    _usernameController.addListener(() => setState(() {}));
-    _phoneController.addListener(() => setState(() {}));
-    _bioController.addListener(() => setState(() {}));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadProfileData();
+    });
   }
 
   @override
@@ -72,13 +71,13 @@ class _EditProfileViewState extends State<EditProfileView> {
     _usernameController.dispose();
     _phoneController.dispose();
     _bioController.dispose();
-    _emailController.dispose();
     super.dispose();
   }
 
   double _calculateProgress() {
     int totalFields = 8;
     int filledFields = 0;
+
     if (_nameController.text.isNotEmpty) filledFields++;
     if (_usernameController.text.isNotEmpty) filledFields++;
     if (_phoneController.text.isNotEmpty) filledFields++;
@@ -89,6 +88,7 @@ class _EditProfileViewState extends State<EditProfileView> {
     if (_imageFile != null ||
         (_currentProfileUrl != null && _currentProfileUrl!.isNotEmpty))
       filledFields++;
+
     return filledFields / totalFields;
   }
 
@@ -106,19 +106,57 @@ class _EditProfileViewState extends State<EditProfileView> {
 
   Future<void> _loadProfileData() async {
     setState(() => _isLoading = true);
-    try {
-      // Get user profile using the correct method
-      final profile = await _authService.getUserProfile();
-      final user = _authService.getCurrentUser();
 
+    try {
+      // First try to get data from the view model if it exists
+      try {
+        final viewModel = context.read<MoreViewModel>();
+        if (viewModel.fullName != 'Guest User') {
+          _nameController.text = viewModel.fullName;
+          _usernameController.text = viewModel.username;
+          _email = viewModel.email;
+          _currentProfileUrl = viewModel.profileUrl;
+
+          // Load additional data from auth service
+          final profile = await _authService.getUserProfileConsistent();
+          if (profile != null) {
+            _phoneController.text = profile['phone_number']?.toString() ?? '';
+            _bioController.text = profile['bio']?.toString() ?? '';
+            setState(() {
+              _selectedGender = profile['gender']?.toString();
+              _selectedReligion = profile['religion']?.toString();
+              _selectedDay = profile['dob_day'] as int?;
+              _selectedMonth = profile['dob_month']?.toString();
+              _selectedYear = profile['dob_year'] as int?;
+            });
+          }
+        } else {
+          // View model doesn't have data, fetch directly
+          await _fetchProfileDirectly();
+        }
+      } catch (e) {
+        // View model not available, fetch directly
+        debugPrint('View model not available, fetching directly: $e');
+        await _fetchProfileDirectly();
+      }
+    } catch (e) {
+      debugPrint('Error loading profile: $e');
+      _showTopSnackBar('Failed to load profile', isError: true);
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _fetchProfileDirectly() async {
+    try {
+      final profile = await _authService.getUserProfileConsistent();
       if (profile != null) {
         _nameController.text = profile['full_name']?.toString() ?? '';
         _usernameController.text = profile['username']?.toString() ?? '';
-        _bioController.text = profile['bio']?.toString() ?? '';
+        _email = profile['email']?.toString() ?? '';
         _phoneController.text = profile['phone_number']?.toString() ?? '';
-        _currentProfileUrl =
-            profile['avatar_url']?.toString(); // Updated field name
-        _emailController.text = user?.email ?? '';
+        _bioController.text = profile['bio']?.toString() ?? '';
+        _currentProfileUrl = profile['avatar_url']?.toString();
 
         setState(() {
           _selectedGender = profile['gender']?.toString();
@@ -126,15 +164,24 @@ class _EditProfileViewState extends State<EditProfileView> {
           _selectedDay = profile['dob_day'] as int?;
           _selectedMonth = profile['dob_month']?.toString();
           _selectedYear = profile['dob_year'] as int?;
-          _selectedStateId = profile['state_id'] as int?;
-          _selectedLgaId = profile['lga_id'] as int?;
         });
+      } else {
+        // Fallback to basic auth data
+        final user = _authService.getCurrentUser();
+        if (user != null) {
+          _nameController.text =
+              user.userMetadata?['full_name']?.toString() ??
+              user.email?.split('@').first ??
+              'User';
+          _email = user.email ?? '';
+          _usernameController.text = _nameController.text
+              .toLowerCase()
+              .replaceAll(' ', '_');
+        }
       }
     } catch (e) {
-      debugPrint('Error loading profile: $e');
-      _showTopSnackBar('Failed to load profile', isError: true);
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
+      debugPrint('Error fetching profile directly: $e');
+      rethrow;
     }
   }
 
@@ -207,10 +254,12 @@ class _EditProfileViewState extends State<EditProfileView> {
             uploadResult['message'] ?? 'Failed to upload image',
             isError: true,
           );
+          setState(() => _isLoading = false);
+          return;
         }
       }
 
-      // Update profile using the correct method
+      // Update profile
       final updateResult = await _authService.updateProfile(
         fullName: _nameController.text.trim(),
         username: _usernameController.text.trim(),
@@ -222,12 +271,19 @@ class _EditProfileViewState extends State<EditProfileView> {
         dobDay: _selectedDay,
         dobMonth: _selectedMonth,
         dobYear: _selectedYear,
-        stateId: _selectedStateId,
-        lgaId: _selectedLgaId,
       );
 
       if (updateResult['success'] == true) {
         _showTopSnackBar('Profile updated successfully!');
+
+        // Notify the view model if it exists
+        try {
+          final viewModel = context.read<MoreViewModel>();
+          viewModel.refreshProfile();
+        } catch (e) {
+          debugPrint('Could not notify view model: $e');
+        }
+
         if (mounted) {
           Navigator.pop(context);
         }
@@ -253,15 +309,41 @@ class _EditProfileViewState extends State<EditProfileView> {
     final theme = Theme.of(context);
     final progress = _calculateProgress();
 
+    if (_isLoading && _nameController.text.isEmpty) {
+      return Scaffold(
+        backgroundColor: theme.scaffoldBackgroundColor,
+        appBar: AppBar(
+          elevation: 0,
+          backgroundColor: theme.appBarTheme.backgroundColor,
+          leading: IconButton(
+            icon: Icon(
+              Icons.arrow_back_ios,
+              color: theme.appBarTheme.iconTheme?.color,
+              size: 20,
+            ),
+            onPressed: () => Navigator.pop(context),
+          ),
+          title: Text(
+            'Edit Profile',
+            style: theme.appBarTheme.titleTextStyle?.copyWith(
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          centerTitle: true,
+        ),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
         elevation: 0,
-        backgroundColor: theme.scaffoldBackgroundColor,
+        backgroundColor: theme.appBarTheme.backgroundColor,
         leading: IconButton(
           icon: Icon(
             Icons.arrow_back_ios,
-            color: theme.iconTheme.color,
+            color: theme.appBarTheme.iconTheme?.color,
             size: 20,
           ),
           onPressed: () => Navigator.pop(context),
@@ -375,39 +457,27 @@ class _EditProfileViewState extends State<EditProfileView> {
                   _buildLabel("Birthday", theme),
                   _buildBirthdaySelector(theme),
                   const SizedBox(height: 20),
-                  // Display State and LGA if available
-                  if (_selectedStateId != null && _selectedLgaId != null)
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _buildLabel("Location", theme),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 15,
-                            vertical: 15,
-                          ),
-                          decoration: BoxDecoration(
-                            color: theme.cardColor,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: theme.dividerColor.withOpacity(0.3),
-                            ),
-                          ),
-                          child: Text(
-                            'State ID: $_selectedStateId, LGA ID: $_selectedLgaId',
-                            style: theme.textTheme.bodyMedium,
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-                      ],
-                    ),
                   _buildLabel("Email (Read Only)", theme),
-                  _buildTextField(
-                    controller: _emailController,
-                    hint: "Email",
-                    readOnly: true,
-                    fillColor: theme.disabledColor.withOpacity(0.05),
-                    theme: theme,
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 16,
+                    ),
+                    decoration: BoxDecoration(
+                      color: theme.disabledColor.withOpacity(0.05),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: theme.dividerColor.withOpacity(0.3),
+                      ),
+                    ),
+                    child: Text(
+                      _email,
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        color: theme.textTheme.bodyLarge?.color?.withOpacity(
+                          0.7,
+                        ),
+                      ),
+                    ),
                   ),
                   const SizedBox(height: 40),
                 ],

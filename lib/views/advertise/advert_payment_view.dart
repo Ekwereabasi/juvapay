@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../../services/supabase_auth_service.dart';
-import '../../services/wallet_service.dart';
+import 'package:juvapay/services/supabase_auth_service.dart';
+import 'package:juvapay/services/wallet_service.dart';
 import 'package:lottie/lottie.dart';
-import 'product_upload.dart';
+import 'package:juvapay/views/market/marketplace_upload_page.dart';
+import 'dart:async';
 
 class AdvertPaymentView extends StatefulWidget {
   const AdvertPaymentView({super.key});
@@ -21,25 +22,50 @@ class _AdvertPaymentViewState extends State<AdvertPaymentView> {
   bool _isProcessing = false;
 
   double _walletBalance = 0.0;
+  double _availableBalance = 0.0;
+  Wallet? _wallet;
+  StreamSubscription? _walletStreamSubscription;
 
   @override
   void initState() {
     super.initState();
+    _initializeWalletStream();
     _checkSubscription();
+  }
+
+  @override
+  void dispose() {
+    _walletStreamSubscription?.cancel();
+    super.dispose();
+  }
+
+  void _initializeWalletStream() {
+    try {
+      _walletStreamSubscription = _walletService.getWalletStream().listen(
+        (walletData) {
+          if (mounted) {
+            setState(() {
+              _walletBalance = walletData['current_balance'] ?? 0.0;
+              _availableBalance = walletData['available_balance'] ?? 0.0;
+            });
+          }
+        },
+        onError: (error) {
+          debugPrint('Error in wallet stream: $error');
+        },
+      );
+    } catch (e) {
+      debugPrint('Error initializing wallet stream: $e');
+    }
   }
 
   Future<void> _checkSubscription() async {
     setState(() => _isLoading = true);
 
     try {
-      // Check if user has active subscription
-      _hasActiveSubscription = await _authService.hasActiveSubscription();
+      final subscription = await _walletService.checkAdvertSubscription();
+      _hasActiveSubscription = subscription['is_active'] == true;
 
-      // Get wallet balance
-      final wallet = await _walletService.getWalletBalance();
-      _walletBalance = wallet['balance'] as double;
-
-      // If already has subscription, navigate to upload page
       if (_hasActiveSubscription) {
         _navigateToUpload();
       }
@@ -56,37 +82,48 @@ class _AdvertPaymentViewState extends State<AdvertPaymentView> {
     setState(() => _isProcessing = true);
 
     try {
-      final result = await _authService.processAdvertPayment();
+      // First check balance using the new system
+      final balanceCheck = await _walletService.checkBalance(1000.0);
 
-      if (result['success'] == true) {
-        await _showSuccessAnimation();
+      if (balanceCheck['hasSufficientBalance'] == true) {
+        // Process advert payment
+        final result = await _walletService.processAdvertPayment();
 
-        // Navigate to upload page
-        _navigateToUpload();
+        if (result['success'] == true) {
+          await _showSuccessAnimation();
 
-        // Show success message
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Advert subscription activated successfully!'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      } else if (result['message'] == 'INSUFFICIENT_FUNDS') {
-        // Show insufficient funds dialog
-        _showInsufficientFundsDialog();
+          // Navigate back to upload page with success
+          Navigator.of(context).pop(true);
+
+          // Show success message
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Advert subscription activated successfully!'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Payment failed: ${result['message']}'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Payment failed: ${result['message']}'),
-            backgroundColor: Colors.red,
-          ),
+        // Show insufficient funds dialog
+        _showInsufficientFundsDialog(
+          currentBalance: balanceCheck['currentBalance'] as double,
+          availableBalance: balanceCheck['availableBalance'] as double,
+          deficit: balanceCheck['deficit'] as double,
+          isWalletLocked: balanceCheck['isWalletLocked'] as bool,
         );
       }
     } catch (e) {
       debugPrint('Payment error: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Payment failed: $e'),
+          content: Text('Payment failed: ${e.toString()}'),
           backgroundColor: Colors.red,
         ),
       );
@@ -97,7 +134,12 @@ class _AdvertPaymentViewState extends State<AdvertPaymentView> {
     }
   }
 
-  void _showInsufficientFundsDialog() {
+  void _showInsufficientFundsDialog({
+    required double currentBalance,
+    required double availableBalance,
+    required double deficit,
+    required bool isWalletLocked,
+  }) {
     showDialog(
       context: context,
       builder:
@@ -107,11 +149,41 @@ class _AdvertPaymentViewState extends State<AdvertPaymentView> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                if (isWalletLocked)
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.orange),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.warning, color: Colors.orange),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Your wallet is currently locked. Please contact support.',
+                            style: TextStyle(color: Colors.orange),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                if (isWalletLocked) const SizedBox(height: 10),
                 const Text('You need ₦1,000 to activate advert subscription.'),
                 const SizedBox(height: 10),
-                Text('Current Balance: ₦${_walletBalance.toStringAsFixed(2)}'),
+                Text('Current Balance: ₦${currentBalance.toStringAsFixed(2)}'),
+                Text(
+                  'Available Balance: ₦${availableBalance.toStringAsFixed(2)}',
+                ),
+                if (_wallet?.lockedBalance != null &&
+                    _wallet!.lockedBalance > 0)
+                  Text(
+                    'Locked Balance: ₦${_wallet!.lockedBalance.toStringAsFixed(2)}',
+                  ),
                 Text('Required: ₦1,000.00'),
-                Text('Deficit: ₦${(1000 - _walletBalance).toStringAsFixed(2)}'),
+                Text('Deficit: ₦${deficit.toStringAsFixed(2)}'),
               ],
             ),
             actions: [
@@ -173,10 +245,7 @@ class _AdvertPaymentViewState extends State<AdvertPaymentView> {
   }
 
   void _navigateToUpload() {
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (context) => const MarketplaceUploadPage()),
-    );
+    Navigator.of(context).pop(true);
   }
 
   @override
@@ -195,14 +264,16 @@ class _AdvertPaymentViewState extends State<AdvertPaymentView> {
       appBar: AppBar(
         title: Text(
           "Advertise With Us",
-          style: theme.appBarTheme.titleTextStyle?.copyWith(
-            fontWeight: FontWeight.bold,
-          ),
+          style: Theme.of(
+            context,
+          ).appBarTheme.titleTextStyle?.copyWith(fontWeight: FontWeight.bold),
         ),
-        backgroundColor: theme.scaffoldBackgroundColor,
-        elevation: 0,
+        backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
+        elevation: Theme.of(context).appBarTheme.elevation ?? 0,
         automaticallyImplyLeading: true,
         centerTitle: true,
+        iconTheme: Theme.of(context).appBarTheme.iconTheme,
+        actionsIconTheme: Theme.of(context).appBarTheme.actionsIconTheme,
       ),
       body: Column(
         children: [
@@ -316,7 +387,7 @@ class _AdvertPaymentViewState extends State<AdvertPaymentView> {
                     ),
                   ),
 
-                  // Wallet Balance Info
+                  // Real-time Wallet Balance Info
                   const SizedBox(height: 20),
                   Container(
                     padding: const EdgeInsets.all(16),
@@ -325,38 +396,115 @@ class _AdvertPaymentViewState extends State<AdvertPaymentView> {
                       borderRadius: BorderRadius.circular(10),
                       border: Border.all(color: theme.dividerColor),
                     ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             Text(
-                              "Your Wallet Balance",
+                              "Your Wallet (Live)",
                               style: TextStyle(
                                 fontSize: 14,
                                 color: theme.hintColor,
                               ),
                             ),
-                            const SizedBox(height: 4),
-                            Text(
-                              "₦${_walletBalance.toStringAsFixed(2)}",
-                              style: const TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                              ),
+                            Icon(
+                              Icons.refresh,
+                              size: 16,
+                              color: theme.primaryColor,
                             ),
                           ],
                         ),
-                        ElevatedButton(
-                          onPressed: () {
-                            Navigator.pushNamed(context, '/fund-wallet');
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: theme.primaryColor,
-                            foregroundColor: Colors.white,
+                        const SizedBox(height: 12),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  "Total Balance",
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: theme.hintColor,
+                                  ),
+                                ),
+                                Text(
+                                  "₦${_walletBalance.toStringAsFixed(2)}",
+                                  style: const TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  "Available",
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: theme.hintColor,
+                                  ),
+                                ),
+                                Text(
+                                  "₦${_availableBalance.toStringAsFixed(2)}",
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                    color:
+                                        _availableBalance >= 1000
+                                            ? Colors.green
+                                            : Colors.orange,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        if (_availableBalance < 1000)
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.orange.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.warning,
+                                  color: Colors.orange,
+                                  size: 16,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'Add ₦${(1000 - _availableBalance).toStringAsFixed(2)} more to proceed',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.orange,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
-                          child: const Text('ADD FUNDS'),
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed: () {
+                              Navigator.pushNamed(context, '/fund-wallet');
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: theme.primaryColor,
+                              foregroundColor: Colors.white,
+                            ),
+                            child: const Text('ADD FUNDS TO WALLET'),
+                          ),
                         ),
                       ],
                     ),
@@ -379,55 +527,139 @@ class _AdvertPaymentViewState extends State<AdvertPaymentView> {
                 ),
               ],
             ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            child: Column(
               children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      "Advert Fee",
-                      style: TextStyle(fontSize: 12, color: theme.hintColor),
+                if (_availableBalance < 1000)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 8,
+                      horizontal: 12,
                     ),
-                    Text(
-                      "₦1,000",
-                      style: theme.textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        fontSize: 24,
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(
+                          Icons.warning_amber,
+                          color: Colors.orange,
+                          size: 18,
+                        ),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Insufficient available balance',
+                            style: TextStyle(
+                              color: Colors.orange,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          "Advert Fee",
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: theme.hintColor,
+                          ),
+                        ),
+                        Text(
+                          "₦1,000",
+                          style: theme.textTheme.headlineSmall?.copyWith(
+                            fontWeight: FontWeight.w900,
+                            fontSize: 24,
+                          ),
+                        ),
+                      ],
+                    ),
+                    ElevatedButton(
+                      onPressed:
+                          _isProcessing
+                              ? null
+                              : () async {
+                                final balanceCheck = await _walletService
+                                    .checkBalance(1000.0);
+                                if (balanceCheck['isWalletLocked'] == true) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Your wallet is locked. Please contact support.',
+                                      ),
+                                      backgroundColor: Colors.red,
+                                    ),
+                                  );
+                                } else if (balanceCheck['hasSufficientBalance'] ==
+                                    true) {
+                                  _processPayment();
+                                } else {
+                                  _showInsufficientFundsDialog(
+                                    currentBalance:
+                                        balanceCheck['currentBalance']
+                                            as double,
+                                    availableBalance:
+                                        balanceCheck['availableBalance']
+                                            as double,
+                                    deficit: balanceCheck['deficit'] as double,
+                                    isWalletLocked: false,
+                                  );
+                                }
+                              },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor:
+                            _availableBalance >= 1000
+                                ? theme.primaryColor
+                                : Colors.grey,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 30,
+                          vertical: 15,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(5),
+                        ),
                       ),
+                      child:
+                          _isProcessing
+                              ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                              : Text(
+                                _availableBalance >= 1000
+                                    ? "PAY & CONTINUE"
+                                    : "INSUFFICIENT BALANCE",
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                     ),
                   ],
                 ),
-                ElevatedButton(
-                  onPressed: _isProcessing ? null : _processPayment,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: theme.primaryColor,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 30,
-                      vertical: 15,
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(5),
-                    ),
+                const SizedBox(height: 8),
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(context).pop(false);
+                  },
+                  child: const Text(
+                    'CANCEL',
+                    style: TextStyle(color: Colors.grey),
                   ),
-                  child:
-                      _isProcessing
-                          ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
-                          : const Text(
-                            "PAY & CONTINUE",
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
                 ),
               ],
             ),

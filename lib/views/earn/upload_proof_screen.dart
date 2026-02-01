@@ -4,9 +4,14 @@ import 'package:image_picker/image_picker.dart';
 import 'package:juvapay/services/supabase_auth_service.dart';
 
 class UploadProofScreen extends StatefulWidget {
-  final int taskId;
+  final String assignmentId;
+  final Map<String, dynamic> taskData;
 
-  const UploadProofScreen({super.key, required this.taskId});
+  const UploadProofScreen({
+    super.key,
+    required this.assignmentId,
+    required this.taskData,
+  });
 
   @override
   State<UploadProofScreen> createState() => _UploadProofScreenState();
@@ -22,17 +27,18 @@ class _UploadProofScreenState extends State<UploadProofScreen> {
   bool _hasImageError = false;
   String? _imageError;
 
-  // Constants for consistent theming
-  static const _contentPadding = EdgeInsets.all(20.0);
-  static const _sectionSpacing = 25.0;
-  static const _inputPadding = EdgeInsets.symmetric(
-    horizontal: 15,
-    vertical: 15,
-  );
-  static const _imageContainerHeight = 200.0;
-  static const _buttonHeight = 50.0;
   static const _maxUsernameLength = 50;
-  static const _allowedImageSize = 10 * 1024 * 1024; // 10MB in bytes
+  static const _allowedImageSize = 10 * 1024 * 1024;
+
+  @override
+  void initState() {
+    super.initState();
+    // Pre-fill username if available from task data
+    if (widget.taskData['proof_platform_username'] != null) {
+      _usernameController.text =
+          widget.taskData['proof_platform_username'].toString();
+    }
+  }
 
   @override
   void dispose() {
@@ -44,7 +50,7 @@ class _UploadProofScreenState extends State<UploadProofScreen> {
     try {
       final XFile? pickedFile = await _picker.pickImage(
         source: ImageSource.gallery,
-        maxWidth: 1920, // Reduce image size for better performance
+        maxWidth: 1920,
         maxHeight: 1080,
         imageQuality: 85,
       );
@@ -116,22 +122,24 @@ class _UploadProofScreenState extends State<UploadProofScreen> {
     setState(() => _isSubmitting = true);
 
     try {
-      await _authService.submitTaskProof(
-        taskId: widget.taskId,
+      final result = await _authService.submitTaskProof(
+        assignmentId: widget.assignmentId,
         platformUsername: _usernameController.text.trim(),
         proofImage: _imageFile!,
       );
 
-      if (mounted) {
-        await _showSuccessDialog();
+      if (result['success'] == true) {
+        if (mounted) {
+          await _showSuccessDialog();
+        }
+      } else {
+        _showSnackBar(result['message'] ?? 'Submission failed', isError: true);
       }
     } catch (e) {
-      if (mounted) {
-        _showSnackBar(
-          'Submission failed: ${_getUserFriendlyError(e)}',
-          isError: true,
-        );
-      }
+      _showSnackBar(
+        'Submission failed: ${_getUserFriendlyError(e)}',
+        isError: true,
+      );
     } finally {
       if (mounted) {
         setState(() => _isSubmitting = false);
@@ -213,10 +221,20 @@ class _UploadProofScreenState extends State<UploadProofScreen> {
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    "We have received your proof and will review it shortly.",
+                    "Your proof has been submitted for review.",
                     style: Theme.of(ctx).textTheme.bodyMedium,
                     textAlign: TextAlign.center,
                   ),
+                  const SizedBox(height: 8),
+                  if (widget.taskData['payout_amount'] != null)
+                    Text(
+                      "Payout: ₦${(widget.taskData['payout_amount'] as num).toStringAsFixed(2)}",
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.green,
+                      ),
+                    ),
                   const SizedBox(height: 16),
                   Text(
                     "You'll be notified once it's approved.",
@@ -257,27 +275,51 @@ class _UploadProofScreenState extends State<UploadProofScreen> {
     );
   }
 
+  AppBar _buildAppBar(ThemeData theme) {
+    return AppBar(
+      title: Text(
+        "Upload Proof",
+        style: Theme.of(
+          context,
+        ).appBarTheme.titleTextStyle?.copyWith(fontWeight: FontWeight.w600),
+      ),
+      backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
+      elevation: Theme.of(context).appBarTheme.elevation ?? 0,
+      leading: IconButton(
+        icon: Icon(
+          Icons.arrow_back_ios_new_rounded,
+          color: Theme.of(context).appBarTheme.iconTheme?.color,
+          size: 20,
+        ),
+        onPressed: () => Navigator.pop(context),
+      ),
+      iconTheme: Theme.of(context).appBarTheme.iconTheme,
+      actionsIconTheme: Theme.of(context).appBarTheme.actionsIconTheme,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
     return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
       appBar: _buildAppBar(theme),
       body: SafeArea(
         child: SingleChildScrollView(
           physics: const ClampingScrollPhysics(),
-          padding: _contentPadding,
+          padding: const EdgeInsets.all(20.0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              _buildTaskInfoSection(theme),
+              const SizedBox(height: 20),
               _buildWarningSection(theme, isDark),
-              SizedBox(height: _sectionSpacing),
+              const SizedBox(height: 25),
               _buildUsernameInputSection(theme, isDark),
-              SizedBox(height: _sectionSpacing),
+              const SizedBox(height: 25),
               _buildImageUploadSection(theme, isDark),
-              SizedBox(height: _sectionSpacing * 1.5),
+              const SizedBox(height: 30),
               _buildSubmitButton(theme, isDark),
             ],
           ),
@@ -286,23 +328,60 @@ class _UploadProofScreenState extends State<UploadProofScreen> {
     );
   }
 
-  AppBar _buildAppBar(ThemeData theme) {
-    return AppBar(
-      title: Text(
-        "Upload Proof",
-        style: theme.appBarTheme.titleTextStyle?.copyWith(
-          fontWeight: FontWeight.w600,
-        ),
+  Widget _buildTaskInfoSection(ThemeData theme) {
+    final taskTitle = widget.taskData['task_title'] ?? 'Task';
+    final payoutAmount = widget.taskData['payout_amount'] ?? 0.0;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: theme.cardColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: theme.dividerColor),
       ),
-      backgroundColor: theme.scaffoldBackgroundColor,
-      elevation: 0,
-      leading: IconButton(
-        icon: Icon(
-          Icons.arrow_back_ios_new_rounded,
-          color: theme.iconTheme.color,
-          size: 20,
-        ),
-        onPressed: () => Navigator.pop(context),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "Task:",
+                  style: TextStyle(fontSize: 12, color: theme.hintColor),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  taskTitle,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 16),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                "Payout:",
+                style: TextStyle(fontSize: 12, color: theme.hintColor),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '₦${payoutAmount.toStringAsFixed(2)}',
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                  color: Colors.green,
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -327,8 +406,8 @@ class _UploadProofScreenState extends State<UploadProofScreen> {
           const SizedBox(width: 12),
           Expanded(
             child: Text(
-              "Important: Do NOT unfollow or undo the task action after submission. "
-              "Violations may result in account suspension.",
+              "Important: Your proof must clearly show task completion. "
+              "Make sure the screenshot includes all required elements.",
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: Colors.orange.shade700,
                 fontSize: 13,
@@ -347,7 +426,7 @@ class _UploadProofScreenState extends State<UploadProofScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          "Social Media Username",
+          "Social Media Username *",
           style: theme.textTheme.titleMedium?.copyWith(
             fontWeight: FontWeight.w600,
           ),
@@ -366,7 +445,10 @@ class _UploadProofScreenState extends State<UploadProofScreen> {
               borderRadius: BorderRadius.circular(12),
               borderSide: BorderSide.none,
             ),
-            contentPadding: _inputPadding,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 15,
+              vertical: 15,
+            ),
             counterText: '',
             prefixIcon: Icon(Icons.person_outline, color: theme.hintColor),
             enabledBorder: OutlineInputBorder(
@@ -404,7 +486,7 @@ class _UploadProofScreenState extends State<UploadProofScreen> {
         Row(
           children: [
             Text(
-              "Upload Screenshot",
+              "Upload Screenshot *",
               style: theme.textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w600,
               ),
@@ -420,7 +502,7 @@ class _UploadProofScreenState extends State<UploadProofScreen> {
         ),
         const SizedBox(height: 8),
 
-        if (_imageError != null) ...[
+        if (_imageError != null)
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(12),
@@ -451,12 +533,11 @@ class _UploadProofScreenState extends State<UploadProofScreen> {
               ],
             ),
           ),
-        ],
 
         GestureDetector(
           onTap: _isSubmitting ? null : _pickImage,
           child: Container(
-            height: _imageContainerHeight,
+            height: 200,
             width: double.infinity,
             decoration: BoxDecoration(
               color: theme.cardColor,
@@ -611,7 +692,7 @@ class _UploadProofScreenState extends State<UploadProofScreen> {
                   : theme.hintColor,
           disabledBackgroundColor: theme.primaryColor.withOpacity(0.2),
           disabledForegroundColor: theme.hintColor,
-          minimumSize: const Size.fromHeight(_buttonHeight),
+          minimumSize: const Size.fromHeight(50),
           padding: const EdgeInsets.symmetric(vertical: 16),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),

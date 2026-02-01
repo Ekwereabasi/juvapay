@@ -1,6 +1,8 @@
+// view_models/more_view_model.dart - Complete fixed version
+
 import 'package:flutter/material.dart';
-import 'dart:io'; // For File class
-import 'package:supabase_flutter/supabase_flutter.dart'; // For User class
+import 'dart:io';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/supabase_auth_service.dart';
 import '../services/theme_service.dart';
 import '../views/auth/login_view.dart';
@@ -12,30 +14,92 @@ class MoreViewModel extends ChangeNotifier {
   bool _isLoading = false;
   String _fullName = 'Guest User';
   String _username = 'loading...';
+  String _email = '';
   String? _profileUrl;
+  bool _isMember = false;
 
   bool get isLoading => _isLoading;
   String get fullName => _fullName;
   String get username => _username;
+  String get email => _email;
   String? get profileUrl => _profileUrl;
+  bool get isMember => _isMember;
+  
+  // Theme related
+  ThemeMode get themeMode => _themeService.themeMode;
 
   MoreViewModel(this._themeService) {
     fetchProfileData();
+    _setupAuthListener();
   }
 
+  // Listen to auth state changes
+  void _setupAuthListener() {
+    _authService.authStateChanges.listen((authState) {
+      final session = authState.session;
+      if (session != null) {
+        // Refresh profile when auth state changes
+        fetchProfileData();
+      } else {
+        // Clear data when logged out
+        clearProfileData();
+      }
+    });
+  }
+
+  // Updated to use consistent method
   Future<void> fetchProfileData() async {
     _isLoading = true;
     notifyListeners();
 
     try {
-      final profile = await _authService.getUserProfile();
-      if (profile != null) {
-        _fullName = profile['full_name'] ?? 'User';
-        _username = profile['username'] ?? 'user';
+      // Use the consistent method from auth service
+      final profile = await _authService.getUserProfileConsistent();
+      
+      if (profile != null && profile.isNotEmpty) {
+        _fullName = profile['full_name']?.toString() ?? 'User';
+        _username = profile['username']?.toString() ?? 'user';
+        _email = profile['email']?.toString() ?? '';
         _profileUrl = profile['avatar_url'];
+        _isMember = profile['is_member'] == true;
+        
+        debugPrint('MoreViewModel - Profile loaded successfully');
+        debugPrint('Full Name: $_fullName, Email: $_email, Is Member: $_isMember');
+      } else {
+        debugPrint('MoreViewModel - Profile is empty or null');
+        
+        // Fallback: try without email
+        final basicProfile = await _authService.getUserProfile();
+        if (basicProfile != null) {
+          _fullName = basicProfile['full_name']?.toString() ?? 'User';
+          _username = basicProfile['username']?.toString() ?? 'user';
+          _profileUrl = basicProfile['avatar_url'];
+          _isMember = basicProfile['is_member'] == true;
+          
+          // Get email from auth user
+          final user = getCurrentUser();
+          _email = user?.email ?? '';
+        } else {
+          // Last resort: get from auth user
+          final user = getCurrentUser();
+          if (user != null) {
+            _fullName = user.userMetadata?['full_name']?.toString() ?? 
+                       user.email?.split('@').first ?? 'User';
+            _email = user.email ?? '';
+            _username = _fullName.toLowerCase().replaceAll(' ', '_');
+          }
+        }
       }
     } catch (e) {
-      debugPrint("Profile fetch error: $e");
+      debugPrint("MoreViewModel - Profile fetch error: $e");
+      
+      // Emergency fallback
+      final user = getCurrentUser();
+      if (user != null) {
+        _fullName = user.email?.split('@').first ?? 'User';
+        _email = user.email ?? '';
+        _username = _fullName.toLowerCase().replaceAll(' ', '_');
+      }
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -49,6 +113,7 @@ class MoreViewModel extends ChangeNotifier {
     try {
       // 1. Sign out from Supabase
       await _authService.signOut();
+      clearProfileData();
 
       // 2. Clear stack and navigate to Login
       if (context.mounted) {
@@ -82,6 +147,7 @@ class MoreViewModel extends ChangeNotifier {
     String? fullName,
     String? username,
     String? phone,
+    String? avatarUrl,
     String? bio,
     String? gender,
     String? religion,
@@ -99,6 +165,7 @@ class MoreViewModel extends ChangeNotifier {
         fullName: fullName,
         username: username,
         phone: phone,
+        avatarUrl: avatarUrl,
         bio: bio,
         gender: gender,
         religion: religion,
@@ -113,6 +180,10 @@ class MoreViewModel extends ChangeNotifier {
       if (result['success'] == true) {
         if (fullName != null) _fullName = fullName;
         if (username != null) _username = username;
+        if (avatarUrl != null) _profileUrl = avatarUrl;
+        
+        // Refresh all data
+        await fetchProfileData();
       }
 
       return result;
@@ -132,9 +203,10 @@ class MoreViewModel extends ChangeNotifier {
     try {
       final result = await _authService.uploadAvatar(imageFile);
 
-      // If upload was successful, update local profile URL
+      // If upload was successful, update local profile URL and refresh
       if (result['success'] == true && result['url'] != null) {
         _profileUrl = result['url'];
+        await fetchProfileData(); // Refresh all data
       }
 
       return result;
@@ -157,17 +229,16 @@ class MoreViewModel extends ChangeNotifier {
   // Helper method to get user profile data
   Future<Map<String, dynamic>?> getUserProfileData() async {
     try {
-      return await _authService.getUserProfile();
+      return await _authService.getUserProfileConsistent();
     } catch (e) {
       debugPrint("Error getting user profile: $e");
       return null;
     }
   }
 
-  // Get user email from current user
+  // Get user email
   String? getUserEmail() {
-    final user = getCurrentUser();
-    return user?.email;
+    return _email.isNotEmpty ? _email : getCurrentUser()?.email;
   }
 
   // Get user phone number
@@ -176,13 +247,12 @@ class MoreViewModel extends ChangeNotifier {
     return user?.phone;
   }
 
-  // Get user creation date - FIXED: Parse string to DateTime
+  // Get user creation date
   DateTime? getUserCreatedAt() {
     final user = getCurrentUser();
     if (user?.createdAt == null) return null;
 
     try {
-      // createdAt is a String, parse it to DateTime
       return DateTime.tryParse(user!.createdAt);
     } catch (e) {
       debugPrint("Error parsing user createdAt: $e");
@@ -202,13 +272,12 @@ class MoreViewModel extends ChangeNotifier {
     return user?.appMetadata;
   }
 
-  // Check if email is verified - FIXED: Check emailConfirmedAt as String
+  // Check if email is verified
   bool isEmailVerified() {
     final user = getCurrentUser();
     if (user?.emailConfirmedAt == null) return false;
 
     try {
-      // emailConfirmedAt is a String, if it's not null/empty, email is verified
       return user!.emailConfirmedAt!.isNotEmpty;
     } catch (e) {
       debugPrint("Error checking email verification: $e");
@@ -216,7 +285,7 @@ class MoreViewModel extends ChangeNotifier {
     }
   }
 
-  // Alternative: Get formatted date string
+  // Get formatted date string
   String? getUserCreatedAtFormatted() {
     final date = getUserCreatedAt();
     if (date == null) return null;
@@ -224,7 +293,7 @@ class MoreViewModel extends ChangeNotifier {
     return "${date.day}/${date.month}/${date.year}";
   }
 
-  // Alternative: Get relative time (e.g., "2 days ago")
+  // Get relative time
   String? getUserCreatedAtRelative() {
     final date = getUserCreatedAt();
     if (date == null) return null;
@@ -255,7 +324,7 @@ class MoreViewModel extends ChangeNotifier {
     return user?.id;
   }
 
-  // Get last sign in date - FIXED: Parse lastSignInAt as String
+  // Get last sign in date
   DateTime? getLastSignInAt() {
     final user = getCurrentUser();
     if (user?.lastSignInAt == null) return null;
@@ -272,7 +341,6 @@ class MoreViewModel extends ChangeNotifier {
   bool isPhoneConfirmed() {
     final user = getCurrentUser();
     if (user?.phoneConfirmedAt == null) return false;
-
     return user!.phoneConfirmedAt!.isNotEmpty;
   }
 
@@ -295,8 +363,12 @@ class MoreViewModel extends ChangeNotifier {
 
     return {
       'id': user.id,
-      'email': user.email,
+      'email': _email.isNotEmpty ? _email : user.email,
       'phone': user.phone,
+      'fullName': _fullName,
+      'username': _username,
+      'profileUrl': _profileUrl,
+      'isMember': _isMember,
       'createdAt': user.createdAt,
       'emailConfirmedAt': user.emailConfirmedAt,
       'phoneConfirmedAt': user.phoneConfirmedAt,
@@ -307,10 +379,69 @@ class MoreViewModel extends ChangeNotifier {
       'isPhoneConfirmed': isPhoneConfirmed(),
       'formattedCreatedAt': getUserCreatedAtFormatted(),
       'relativeCreatedAt': getUserCreatedAtRelative(),
-      'lastSignInFormatted':
-          getLastSignInAt() != null
-              ? "${getLastSignInAt()!.day}/${getLastSignInAt()!.month}/${getLastSignInAt()!.year}"
-              : null,
+      'lastSignInFormatted': getLastSignInAt() != null
+          ? "${getLastSignInAt()!.day}/${getLastSignInAt()!.month}/${getLastSignInAt()!.year}"
+          : null,
     };
+  }
+
+  // Theme mode setter
+  void setThemeMode(ThemeMode mode) {
+    _themeService.setThemeMode(mode);
+    notifyListeners();
+  }
+
+  // Update email display
+  void updateEmailDisplay(String email) {
+    _email = email;
+    notifyListeners();
+  }
+
+  // Check if profile is complete
+  bool get isProfileComplete {
+    return _fullName.isNotEmpty && _username.isNotEmpty && _email.isNotEmpty;
+  }
+
+  // Get profile completion percentage
+  double get profileCompletionPercentage {
+    int totalFields = 3;
+    int completedFields = 0;
+
+    if (_fullName.isNotEmpty) completedFields++;
+    if (_username.isNotEmpty) completedFields++;
+    if (_email.isNotEmpty) completedFields++;
+
+    return completedFields / totalFields;
+  }
+
+  // Clear all profile data
+  void clearProfileData() {
+    _fullName = 'Guest User';
+    _username = 'loading...';
+    _email = '';
+    _profileUrl = null;
+    _isMember = false;
+    notifyListeners();
+  }
+
+  // Load profile data with retry
+  Future<void> fetchProfileDataWithRetry({int maxRetries = 3}) async {
+    int retryCount = 0;
+
+    while (retryCount < maxRetries) {
+      try {
+        await fetchProfileData();
+        return;
+      } catch (e) {
+        retryCount++;
+        debugPrint("Profile fetch retry $retryCount failed: $e");
+
+        if (retryCount < maxRetries) {
+          await Future.delayed(Duration(seconds: retryCount * 2));
+        }
+      }
+    }
+
+    debugPrint("Failed to fetch profile after $maxRetries attempts");
   }
 }

@@ -3,17 +3,19 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/user_registration_model.dart';
 import '../services/supabase_auth_service.dart';
-import '../services/state_service.dart'; // Add this import
+import '../services/state_service.dart';
 import '../models/location_models.dart';
+import 'dart:async';
+
 
 class RegistrationViewModel extends ChangeNotifier {
-  // Use the service classes
   final SupabaseAuthService _authService = SupabaseAuthService();
-  final StateService _stateService = StateService(); // Add StateService
+  final StateService _stateService = StateService();
   final UserRegistrationModel _registrationData = UserRegistrationModel();
 
   bool _isLoading = false;
   String? _errorMessage;
+  String? _errorType;
 
   List<StateModel> _states = [];
   List<LgaModel> _lgas = [];
@@ -22,31 +24,40 @@ class RegistrationViewModel extends ChangeNotifier {
   UserRegistrationModel get registrationData => _registrationData;
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
+  String? get errorType => _errorType;
   List<StateModel> get states => _states;
   List<LgaModel> get lgas => _lgas;
 
   // Constructor
   RegistrationViewModel();
 
-  // NEW METHOD: Explicitly initialize and load states
+  // Initialize and load states with error handling
   Future<void> initializeData() async {
-    // Only fetch if data is missing and we aren't already loading
     if (_states.isEmpty && !_isLoading) {
       await _loadStates();
     }
   }
 
-  // Use StateService to load states
   Future<void> _loadStates() async {
     _isLoading = true;
     notifyListeners();
 
     try {
-      _states = await _stateService.getStates();
+      _states = await _stateService.getStates().timeout(
+        const Duration(seconds: 15),
+      );
       _errorMessage = null;
+      _errorType = null;
+    } on TimeoutException catch (_) {
+      _errorMessage = 'Loading states timed out. Please check your connection.';
+      _errorType = 'timeout_error';
+    } on SocketException catch (_) {
+      _errorMessage = 'Network error. Please check your internet connection.';
+      _errorType = 'network_error';
     } catch (e) {
-      _errorMessage =
-          'Could not load states: ${e.toString().replaceFirst('Exception: ', '')}';
+      _errorMessage = 'Could not load states. Please try again.';
+      _errorType = 'data_error';
+      debugPrint('Error loading states: $e');
     }
 
     _isLoading = false;
@@ -55,17 +66,27 @@ class RegistrationViewModel extends ChangeNotifier {
 
   Future<void> loadLgas(StateModel state) async {
     _registrationData.selectedState = state;
-    _registrationData.selectedLga = null; // Reset LGA
-    _lgas = []; // Clear old LGAs
+    _registrationData.selectedLga = null;
+    _lgas = [];
     _isLoading = true;
     notifyListeners();
 
     try {
-      _lgas = await _stateService.getLgasByState(state.id);
+      _lgas = await _stateService
+          .getLgasByState(state.id)
+          .timeout(const Duration(seconds: 15));
       _errorMessage = null;
+      _errorType = null;
+    } on TimeoutException catch (_) {
+      _errorMessage = 'Loading LGAs timed out. Please check your connection.';
+      _errorType = 'timeout_error';
+    } on SocketException catch (_) {
+      _errorMessage = 'Network error. Please check your internet connection.';
+      _errorType = 'network_error';
     } catch (e) {
-      _errorMessage =
-          'Could not load LGAs: ${e.toString().replaceFirst('Exception: ', '')}';
+      _errorMessage = 'Could not load LGAs. Please try again.';
+      _errorType = 'data_error';
+      debugPrint('Error loading LGAs: $e');
     }
 
     _isLoading = false;
@@ -83,11 +104,12 @@ class RegistrationViewModel extends ChangeNotifier {
     required String username,
     required String fullName,
   }) {
-    _registrationData.email = email;
+    _registrationData.email = email.trim().toLowerCase();
     _registrationData.password = password;
-    _registrationData.username = username;
-    _registrationData.fullName = fullName;
+    _registrationData.username = username.trim();
+    _registrationData.fullName = fullName.trim();
     _errorMessage = null;
+    _errorType = null;
     notifyListeners();
   }
 
@@ -96,204 +118,214 @@ class RegistrationViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Add phone number if needed
   void setPhone(String phone) {
-    _registrationData.phone = phone;
+    _registrationData.phone = phone.trim();
     notifyListeners();
   }
 
-  // --- MAIN SIGNUP LOGIC ---
+  // --- MAIN SIGNUP LOGIC WITH COMPREHENSIVE ERROR HANDLING ---
   Future<Map<String, dynamic>> processSignup(BuildContext context) async {
     _isLoading = true;
     _errorMessage = null;
+    _errorType = null;
     notifyListeners();
 
-    // Validate required fields
-    if (_registrationData.selectedState == null ||
-        _registrationData.selectedLga == null) {
-      _errorMessage = "Please select your State and LGA.";
+    // Client-side validation before making network calls
+    final validationResult = _validateRegistrationData();
+    if (!validationResult['valid']) {
       _isLoading = false;
       notifyListeners();
       return {
         'success': false,
-        'message': _errorMessage,
-        'needs_confirmation': false,
-      };
-    }
-
-    // Validate other required fields
-    if (_registrationData.email.isEmpty ||
-        _registrationData.password.isEmpty ||
-        _registrationData.fullName.isEmpty) {
-      _errorMessage = "Please fill in all required fields.";
-      _isLoading = false;
-      notifyListeners();
-      return {
-        'success': false,
-        'message': _errorMessage,
-        'needs_confirmation': false,
+        'message': validationResult['message'],
+        'error_type': 'validation_error',
       };
     }
 
     try {
+      debugPrint('📝 Starting registration process...');
+
       // 1. Sign Up using the auth service
       final signUpResult = await _authService.signUp(
         email: _registrationData.email,
         password: _registrationData.password,
         fullName: _registrationData.fullName,
-        phone: _registrationData.phone, // Use phone if available
+        phone: _registrationData.phone,
+      );
+
+      debugPrint(
+        '📝 Signup result: ${signUpResult['success']} - ${signUpResult['message']}',
       );
 
       // Check if signup was successful
       if (!signUpResult['success']) {
         _errorMessage = signUpResult['message'];
+        _errorType = signUpResult['error_type'];
         _isLoading = false;
         notifyListeners();
         return {
           'success': false,
           'message': _errorMessage,
-          'needs_confirmation': false,
+          'error_type': _errorType,
         };
       }
 
-      // 2. Upload Profile Image if provided
-      String? avatarUrl;
-      if (_registrationData.profileImage != null) {
-        final uploadResult = await _authService.uploadAvatar(
-          _registrationData.profileImage!,
-        );
+      // 2. Upload Profile Image if provided (non-critical operation)
+      await _handleProfileImageUpload();
 
-        if (uploadResult['success']) {
-          avatarUrl = uploadResult['url'];
-        } else {
-          debugPrint(
-            "Profile picture upload failed: ${uploadResult['message']}",
-          );
-        }
-      }
-
-      // 3. Update User Profile with additional information
-      final updateResult = await _authService.updateProfile(
-        fullName: _registrationData.fullName,
-        username: _registrationData.username,
-        phone: _registrationData.phone,
-        avatarUrl: avatarUrl,
-        bio: null, // Add bio if you have it
-        gender: null, // Add gender if you have it
-        religion: null, // Add religion if you have it
-        dobDay: null, // Add dobDay if you have it
-        dobMonth: null, // Add dobMonth if you have it
-        dobYear: null, // Add dobYear if you have it
-        stateId: _registrationData.selectedState?.id,
-        lgaId: _registrationData.selectedLga?.id,
-      );
-
-      if (!updateResult['success']) {
-        debugPrint("Profile update failed: ${updateResult['message']}");
-        // Continue anyway since auth was successful
-      }
+      // 3. Update User Profile with additional information (non-critical)
+      await _updateProfileWithLocation();
 
       _isLoading = false;
       notifyListeners();
 
       return {
         'success': true,
-        'message': signUpResult['message'] ?? 'Registration successful',
-        'needs_confirmation': signUpResult['needs_confirmation'] ?? false,
+        'message': signUpResult['message'] ?? 'Account created successfully!',
         'user_id': signUpResult['user_id'],
+        'warning': signUpResult['warning'],
       };
+    } on TimeoutException catch (e) {
+      _handleError(
+        'Request timed out. Please check your connection and try again.',
+        'timeout_error',
+      );
+    } on SocketException catch (e) {
+      _handleError(
+        'Network error. Please check your internet connection and try again.',
+        'network_error',
+      );
     } on AuthException catch (e) {
-      // Catch Auth errors
-      _errorMessage = SupabaseAuthService.getErrorMessage(e);
+      _handleError(SupabaseAuthService.getErrorMessage(e), 'auth_error');
     } on PostgrestException catch (e) {
-      // Catch Database errors
-      _errorMessage = 'Database Error: ${e.message}';
+      _handleError('Database error: ${e.message}', 'database_error');
     } catch (e) {
-      // Catch all other unexpected errors
-      _errorMessage = 'Error: ${e.toString()}';
+      _handleError(
+        'An unexpected error occurred. Please try again.',
+        'unknown_error',
+      );
+      debugPrint('Unexpected registration error: $e');
     }
 
-    // Set loading to false and return failure state on any catch block
-    _isLoading = false;
-    notifyListeners();
     return {
       'success': false,
       'message': _errorMessage,
-      'needs_confirmation': false,
+      'error_type': _errorType,
     };
   }
 
-  // Simplified signup method for basic registration
-  Future<Map<String, dynamic>> signupUser() async {
-    _isLoading = true;
-    notifyListeners();
-
-    // Basic validation
-    if (!isReadyToSubmit) {
-      _errorMessage = 'Please fill in all required fields';
-      _isLoading = false;
-      notifyListeners();
-      return {'success': false, 'message': _errorMessage};
+  Map<String, dynamic> _validateRegistrationData() {
+    // Validate email
+    if (_registrationData.email.isEmpty) {
+      return {'valid': false, 'message': 'Email address is required.'};
     }
 
-    try {
-      // Call the auth service signUp method
-      final result = await _authService.signUp(
-        email: _registrationData.email,
-        password: _registrationData.password,
-        fullName: _registrationData.fullName,
-        phone: _registrationData.phone,
-      );
-
-      _isLoading = false;
-      notifyListeners();
-
-      if (result['success'] == true) {
-        // If registration successful, update profile with additional info
-        await _updateUserProfileAfterSignup();
-      }
-
-      return result;
-    } catch (e) {
-      _isLoading = false;
-      _errorMessage = SupabaseAuthService.getErrorMessage(e);
-      notifyListeners();
-      return {'success': false, 'message': _errorMessage};
+    if (!isValidEmail(_registrationData.email)) {
+      return {'valid': false, 'message': 'Please enter a valid email address.'};
     }
+
+    // Validate password
+    if (_registrationData.password.isEmpty) {
+      return {'valid': false, 'message': 'Password is required.'};
+    }
+
+    if (_registrationData.password.length < 6) {
+      return {
+        'valid': false,
+        'message': 'Password must be at least 6 characters.',
+      };
+    }
+
+    // Validate full name
+    if (_registrationData.fullName.isEmpty) {
+      return {'valid': false, 'message': 'Full name is required.'};
+    }
+
+    if (_registrationData.fullName.length < 2) {
+      return {'valid': false, 'message': 'Please enter your full name.'};
+    }
+
+    // Validate username
+    if (_registrationData.username.isEmpty) {
+      return {'valid': false, 'message': 'Username is required.'};
+    }
+
+    if (_registrationData.username.length < 3) {
+      return {
+        'valid': false,
+        'message': 'Username must be at least 3 characters.',
+      };
+    }
+
+    if (!isValidUsername(_registrationData.username)) {
+      return {
+        'valid': false,
+        'message':
+            'Username can only contain letters, numbers, and underscores.',
+      };
+    }
+
+    // Validate location
+    if (_registrationData.selectedState == null) {
+      return {'valid': false, 'message': 'Please select your state.'};
+    }
+
+    if (_registrationData.selectedLga == null) {
+      return {'valid': false, 'message': 'Please select your LGA.'};
+    }
+
+    return {'valid': true, 'message': 'All validations passed'};
   }
 
-  Future<void> _updateUserProfileAfterSignup() async {
-    try {
-      String? avatarUrl;
-
-      // Upload profile image if provided
-      if (_registrationData.profileImage != null) {
+  Future<void> _handleProfileImageUpload() async {
+    if (_registrationData.profileImage != null) {
+      try {
         final uploadResult = await _authService.uploadAvatar(
           _registrationData.profileImage!,
         );
-        if (uploadResult['success']) {
-          avatarUrl = uploadResult['url'];
-        }
-      }
 
-      // Update profile with location and other data
+        if (uploadResult['success']) {
+          debugPrint('✅ Profile image uploaded successfully');
+        } else {
+          debugPrint(
+            "⚠️ Profile picture upload failed: ${uploadResult['message']}",
+          );
+        }
+      } catch (e) {
+        debugPrint("⚠️ Error uploading profile image: $e");
+        // Don't throw - image upload is non-critical
+      }
+    }
+  }
+
+  Future<void> _updateProfileWithLocation() async {
+    try {
       await _authService.updateProfile(
         fullName: _registrationData.fullName,
         username: _registrationData.username,
         phone: _registrationData.phone,
-        avatarUrl: avatarUrl,
+        avatarUrl: null, // Already handled in separate step
         stateId: _registrationData.selectedState?.id,
         lgaId: _registrationData.selectedLga?.id,
       );
+      debugPrint('✅ Profile updated with location data');
     } catch (e) {
-      debugPrint("Error updating profile after signup: $e");
-      // Don't throw here - profile update is secondary to registration
+      debugPrint("⚠️ Profile update error (non-critical): $e");
+      // Continue even if profile update fails
     }
+  }
+
+  void _handleError(String message, String type) {
+    _errorMessage = message;
+    _errorType = type;
+    _isLoading = false;
+    notifyListeners();
   }
 
   // Clear error message
   void clearError() {
     _errorMessage = null;
+    _errorType = null;
     notifyListeners();
   }
 
@@ -302,6 +334,7 @@ class RegistrationViewModel extends ChangeNotifier {
     _registrationData.reset();
     _lgas.clear();
     _errorMessage = null;
+    _errorType = null;
     _isLoading = false;
     notifyListeners();
   }
@@ -311,84 +344,14 @@ class RegistrationViewModel extends ChangeNotifier {
     final emailRegex = RegExp(
       r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
     );
-    return emailRegex.hasMatch(email);
-  }
-
-  // Validate password strength
-  bool isValidPassword(String password) {
-    // At least 8 characters, contains uppercase, lowercase, and number
-    if (password.length < 8) return false;
-
-    final hasUppercase = RegExp(r'[A-Z]').hasMatch(password);
-    final hasLowercase = RegExp(r'[a-z]').hasMatch(password);
-    final hasNumber = RegExp(r'[0-9]').hasMatch(password);
-
-    return hasUppercase && hasLowercase && hasNumber;
-  }
-
-  // Get password strength text
-  String getPasswordStrengthText(String password) {
-    if (password.isEmpty) return 'Enter a password';
-    if (password.length < 8) return 'Too short';
-
-    final hasUppercase = RegExp(r'[A-Z]').hasMatch(password);
-    final hasLowercase = RegExp(r'[a-z]').hasMatch(password);
-    final hasNumber = RegExp(r'[0-9]').hasMatch(password);
-
-    final score =
-        [hasUppercase, hasLowercase, hasNumber].where((e) => e).length;
-
-    switch (score) {
-      case 3:
-        return 'Strong';
-      case 2:
-        return 'Medium';
-      case 1:
-        return 'Weak';
-      default:
-        return 'Very weak';
-    }
-  }
-
-  // Get password strength color
-  Color getPasswordStrengthColor(String password) {
-    if (password.isEmpty) return Colors.grey;
-    if (password.length < 8) return Colors.red;
-
-    final hasUppercase = RegExp(r'[A-Z]').hasMatch(password);
-    final hasLowercase = RegExp(r'[a-z]').hasMatch(password);
-    final hasNumber = RegExp(r'[0-9]').hasMatch(password);
-
-    final score =
-        [hasUppercase, hasLowercase, hasNumber].where((e) => e).length;
-
-    switch (score) {
-      case 3:
-        return Colors.green;
-      case 2:
-        return Colors.orange;
-      case 1:
-        return Colors.yellow;
-      default:
-        return Colors.red;
-    }
+    return emailRegex.hasMatch(email.trim());
   }
 
   // Validate username
   bool isValidUsername(String username) {
-    // Username should be 3-20 characters, alphanumeric and underscores only
-    if (username.length < 3 || username.length > 20) return false;
+    if (username.length < 3 || username.length > 30) return false;
     final usernameRegex = RegExp(r'^[a-zA-Z0-9_]+$');
     return usernameRegex.hasMatch(username);
-  }
-
-  // Validate full name
-  bool isValidFullName(String fullName) {
-    // Full name should be at least 2 characters
-    if (fullName.length < 2) return false;
-
-    // Should contain at least one space (first and last name)
-    return fullName.contains(' ');
   }
 
   // Check if all required fields are filled
@@ -424,39 +387,17 @@ class RegistrationViewModel extends ChangeNotifier {
     if (_registrationData.selectedState != null) progress += 0.25;
     if (_registrationData.selectedLga != null) progress += 0.25;
 
-    return progress;
+    return progress.clamp(0.0, 1.0);
   }
 
-  // Get state name by ID (helper method)
-  Future<String?> getStateName(int stateId) async {
-    final state = await _stateService.getStateById(stateId);
-    return state?.name;
-  }
-
-  // Get LGA name by ID (helper method)
-  Future<String?> getLgaName(int lgaId) async {
-    final lga = await _stateService.getLgaById(lgaId);
-    return lga?.name;
-  }
-
-  // Pre-populate location if user already selected before
-  Future<void> preSelectLocation(int? stateId, int? lgaId) async {
-    if (stateId != null) {
-      final state = await _stateService.getStateById(stateId);
-      if (state != null) {
-        _registrationData.selectedState = state;
-        await loadLgas(state);
-
-        if (lgaId != null) {
-          for (final lga in _lgas) {
-            if (lga.id == lgaId) {
-              _registrationData.selectedLga = lga;
-              break;
-            }
-          }
-        }
-      }
+  // Check network connectivity status
+  Future<bool> checkNetworkConnectivity() async {
+    try {
+      // Simple check by attempting to connect
+      await _stateService.getStates().timeout(const Duration(seconds: 5));
+      return true;
+    } catch (_) {
+      return false;
     }
-    notifyListeners();
   }
 }

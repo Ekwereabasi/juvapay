@@ -5,18 +5,25 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:video_player/video_player.dart';
 
-import '../../services/wallet_service.dart';
+import '../../services/supabase_auth_service.dart';
 import '../../services/state_service.dart';
 import '../../models/task_models.dart';
 import '../../models/location_models.dart';
 import '../../utils/platform_helper.dart';
-import '../../utils/task_helper.dart';
 import '../../utils/form_field_helper.dart';
 import '../settings/subpages/fund_wallet_view.dart';
 
 class AdvertFormPage extends StatefulWidget {
   final TaskModel task;
-  const AdvertFormPage({super.key, required this.task});
+  final int quantity;
+  final String platform;
+
+  const AdvertFormPage({
+    super.key,
+    required this.task,
+    required this.quantity,
+    required this.platform,
+  });
 
   @override
   State<AdvertFormPage> createState() => _AdvertFormPageState();
@@ -24,15 +31,12 @@ class AdvertFormPage extends StatefulWidget {
 
 class _AdvertFormPageState extends State<AdvertFormPage> {
   final _formKey = GlobalKey<FormState>();
-  final TextEditingController _quantityController = TextEditingController(
-    text: '10',
-  );
   final TextEditingController _captionController = TextEditingController();
+  final TextEditingController _linkController = TextEditingController();
 
-  late final WalletService _walletService;
+  late final SupabaseAuthService _authService;
   late final StateService _stateService;
 
-  String? _selectedPlatform;
   String _selectedGender = 'All Gender';
   StateModel? _selectedState;
   LgaModel? _selectedLga;
@@ -53,22 +57,16 @@ class _AdvertFormPageState extends State<AdvertFormPage> {
 
   bool _isLoading = false;
   bool _isLoadingStates = false;
-  double _currentBalance = 0.0;
-  int _quantity = 10;
+  double _totalPrice = 0.0;
 
   @override
   void initState() {
     super.initState();
-    _walletService = WalletService();
+    _authService = SupabaseAuthService();
     _stateService = StateService();
+    _totalPrice = widget.task.price * widget.quantity;
     _initializeForm();
     _loadInitialData();
-
-    _quantityController.addListener(() {
-      if (mounted) {
-        setState(() => _quantity = int.tryParse(_quantityController.text) ?? 0);
-      }
-    });
   }
 
   @override
@@ -80,29 +78,19 @@ class _AdvertFormPageState extends State<AdvertFormPage> {
     _videoControllers.clear();
     _videoIsPlaying.clear();
     _videoDurations.clear();
-    
-    _quantityController.dispose();
+
     _captionController.dispose();
+    _linkController.dispose();
     super.dispose();
   }
 
   void _initializeForm() {
-    if (widget.task.platforms.isNotEmpty) {
-      _selectedPlatform = widget.task.platforms.first;
-    }
+    // Set default caption based on task
+    _captionController.text = widget.task.description;
   }
 
   Future<void> _loadInitialData() async {
-    await Future.wait([_loadWalletBalance(), _fetchStates()]);
-  }
-
-  Future<void> _loadWalletBalance() async {
-    try {
-      final wallet = await _walletService.getWalletBalance();
-      setState(() => _currentBalance = (wallet['balance'] as num).toDouble());
-    } catch (e) {
-      debugPrint('Wallet error: $e');
-    }
+    await _fetchStates();
   }
 
   Future<void> _fetchStates() async {
@@ -128,16 +116,18 @@ class _AdvertFormPageState extends State<AdvertFormPage> {
 
   Future<void> _initializeVideoController(File videoFile) async {
     final videoPath = videoFile.path;
-    
+
     if (_videoControllers.containsKey(videoPath)) {
       return; // Already initialized
     }
 
     try {
-      final VideoPlayerController controller = VideoPlayerController.file(videoFile);
-      
+      final VideoPlayerController controller = VideoPlayerController.file(
+        videoFile,
+      );
+
       await controller.initialize();
-      
+
       if (mounted) {
         setState(() {
           _videoControllers[videoPath] = controller;
@@ -189,57 +179,58 @@ class _AdvertFormPageState extends State<AdvertFormPage> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 8),
-            Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: Colors.grey.shade300,
-                borderRadius: BorderRadius.circular(2),
-              ),
+      builder:
+          (context) => SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: 8),
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                ListTile(
+                  leading: Icon(
+                    Icons.photo_library,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                  title: Text(
+                    'Photo Library',
+                    style: Theme.of(context).textTheme.bodyLarge,
+                  ),
+                  onTap: () => Navigator.pop(context, MediaSource.gallery),
+                ),
+                ListTile(
+                  leading: Icon(
+                    Icons.video_library,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                  title: Text(
+                    'Video Library',
+                    style: Theme.of(context).textTheme.bodyLarge,
+                  ),
+                  onTap: () => Navigator.pop(context, MediaSource.gallery),
+                ),
+                ListTile(
+                  leading: Icon(
+                    Icons.camera_alt,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                  title: Text(
+                    'Take ${_selectedMediaType == MediaType.photo ? 'Photo' : 'Video'}',
+                    style: Theme.of(context).textTheme.bodyLarge,
+                  ),
+                  onTap: () => Navigator.pop(context, MediaSource.camera),
+                ),
+                const SizedBox(height: 8),
+              ],
             ),
-            const SizedBox(height: 16),
-            ListTile(
-              leading: Icon(
-                Icons.photo_library,
-                color: Theme.of(context).colorScheme.primary,
-              ),
-              title: Text(
-                'Photo Library',
-                style: Theme.of(context).textTheme.bodyLarge,
-              ),
-              onTap: () => Navigator.pop(context, MediaSource.gallery),
-            ),
-            ListTile(
-              leading: Icon(
-                Icons.video_library,
-                color: Theme.of(context).colorScheme.primary,
-              ),
-              title: Text(
-                'Video Library',
-                style: Theme.of(context).textTheme.bodyLarge,
-              ),
-              onTap: () => Navigator.pop(context, MediaSource.gallery),
-            ),
-            ListTile(
-              leading: Icon(
-                Icons.camera_alt,
-                color: Theme.of(context).colorScheme.primary,
-              ),
-              title: Text(
-                'Take ${_selectedMediaType == MediaType.photo ? 'Photo' : 'Video'}',
-                style: Theme.of(context).textTheme.bodyLarge,
-              ),
-              onTap: () => Navigator.pop(context, MediaSource.camera),
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
+          ),
     );
 
     if (mediaSource == null) return;
@@ -276,9 +267,10 @@ class _AdvertFormPageState extends State<AdvertFormPage> {
         }
       } else if (_selectedMediaType == MediaType.video) {
         final pickedFile = await _picker.pickVideo(
-          source: mediaSource == MediaSource.camera
-              ? ImageSource.camera
-              : ImageSource.gallery,
+          source:
+              mediaSource == MediaSource.camera
+                  ? ImageSource.camera
+                  : ImageSource.gallery,
         );
 
         if (pickedFile != null) {
@@ -293,7 +285,7 @@ class _AdvertFormPageState extends State<AdvertFormPage> {
                 _showError('Maximum 5 videos allowed');
               }
             });
-            
+
             // Initialize video controller for preview
             _initializeVideoController(file);
           } else {
@@ -309,7 +301,7 @@ class _AdvertFormPageState extends State<AdvertFormPage> {
   void _removeMedia(int index) {
     final file = _selectedMediaFiles[index];
     final filePath = file.path;
-    
+
     // Dispose video controller if it's a video
     if (_videoControllers.containsKey(filePath)) {
       _videoControllers[filePath]!.dispose();
@@ -317,7 +309,7 @@ class _AdvertFormPageState extends State<AdvertFormPage> {
       _videoIsPlaying.remove(filePath);
       _videoDurations.remove(filePath);
     }
-    
+
     setState(() => _selectedMediaFiles.removeAt(index));
   }
 
@@ -327,8 +319,6 @@ class _AdvertFormPageState extends State<AdvertFormPage> {
     final seconds = twoDigits(duration.inSeconds.remainder(60));
     return '$minutes:$seconds';
   }
-
-  double get _totalPrice => widget.task.price * _quantity;
 
   Future<void> _submitOrder() async {
     if (!_formKey.currentState!.validate()) {
@@ -341,74 +331,142 @@ class _AdvertFormPageState extends State<AdvertFormPage> {
       return;
     }
 
-    if (_selectedPlatform == null) {
-      _showError('Please select a platform');
-      return;
-    }
-
-    final balanceCheck = await _walletService.checkWalletBalance(_totalPrice);
-    if (balanceCheck['has_sufficient'] == false) {
-      _showInsufficientBalanceDialog();
-      return;
-    }
-
     setState(() => _isLoading = true);
 
     try {
-      final requirements = TaskHelper.getTaskRequirements(widget.task.category);
-
-      final List<String> mediaStoragePaths =
-          _selectedMediaFiles.map((f) => f.path).toList();
-      final List<String> mediaUrls = [];
-
-      final result = await _walletService.processOrderPayment(
+      final result = await _authService.createAdvertiserOrder(
         taskId: widget.task.id,
-        taskTitle: widget.task.title,
-        taskCategory: widget.task.category,
-        platform: _selectedPlatform!,
-        quantity: _quantity,
-        gender: _selectedGender,
-        stateId: _selectedState?.id,
-        stateName: _selectedState?.name,
-        lgaId: _selectedLga?.id,
-        lgaName: _selectedLga?.name,
-        religion: _selectedReligion,
-        caption: _captionController.text.trim(),
-        mediaType: _selectedMediaType.name,
-        mediaUrls: mediaUrls,
-        mediaStoragePaths: mediaStoragePaths,
-        postLink: null,
-        unitPrice: widget.task.price,
-        totalPrice: _totalPrice,
+        platform: widget.platform,
+        quantity: widget.quantity,
+        adContent: _captionController.text.trim(),
+        targetLink:
+            _linkController.text.trim().isEmpty
+                ? null
+                : _linkController.text.trim(),
         metadata: {
-          'submitted_at': DateTime.now().toIso8601String(),
-          'file_count': _selectedMediaFiles.length,
-          'platform': _selectedPlatform!,
-          'platform_display_name': PlatformHelper.getPlatformDisplayName(
-            _selectedPlatform!,
-          ),
-          'category': widget.task.category,
-          'requirements': requirements,
-          'media_files': {
-            'urls': mediaUrls,
-            'paths': mediaStoragePaths,
-            'count': _selectedMediaFiles.length,
-            'type': _selectedMediaType.name,
-          },
+          'gender': _selectedGender,
+          'religion': _selectedReligion,
+          'state': _selectedState?.name,
+          'lga': _selectedLga?.name,
+          'media_type': _selectedMediaType.name,
+          'media_count': _selectedMediaFiles.length,
+          'requires_media_upload': true,
         },
       );
 
+      debugPrint('Order creation result: $result');
+
       if (result['success'] == true) {
-        await _loadWalletBalance();
         _showSuccessDialog();
       } else {
-        _showError(result['message'] ?? 'Failed to submit order');
+        // Show detailed error message
+        String errorMessage = result['message'] ?? 'Failed to submit order';
+
+        // Check for specific error codes
+        if (errorMessage.contains('Insufficient balance') ||
+            errorMessage.contains('Insufficient wallet balance')) {
+          _showInsufficientBalanceDialog(errorMessage);
+        } else if (errorMessage.contains('wallet locked')) {
+          _showWalletLockedDialog(errorMessage);
+        } else if (errorMessage.contains('Task not found')) {
+          _showError('The selected task is no longer available.');
+        } else if (errorMessage.contains('payment')) {
+          _showError('Payment processing failed. Please try again.');
+        } else {
+          _showError(errorMessage);
+        }
+
+        // Log the error for debugging
+        debugPrint(
+          'Order creation failed: ${result['error_code']} - $errorMessage',
+        );
+        if (result['raw_response'] != null) {
+          debugPrint('Raw response: ${result['raw_response']}');
+        }
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
+      debugPrint('Exception in _submitOrder: $e');
+      debugPrint('Stack trace: $stackTrace');
+
       _showError('Failed to submit order: ${e.toString()}');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  void _showInsufficientBalanceDialog(String message) {
+    showDialog(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Insufficient Balance'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(message),
+                const SizedBox(height: 20),
+                Text(
+                  'Total Required: ${FormFieldHelper.formatCurrency(_totalPrice)}',
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.red,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                const Text(
+                  'You need to add funds to your wallet before creating this order.',
+                  style: TextStyle(color: Colors.grey),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  _navigateToFundWallet();
+                },
+                child: const Text('Fund Wallet'),
+              ),
+            ],
+          ),
+    );
+  }
+
+  void _showWalletLockedDialog(String message) {
+    showDialog(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Wallet Locked'),
+            content: Text(message),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  // Navigate to support page or show contact info
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'Please contact support to unlock your wallet',
+                      ),
+                      duration: Duration(seconds: 5),
+                    ),
+                  );
+                },
+                child: const Text('Contact Support'),
+              ),
+            ],
+          ),
+    );
   }
 
   void _navigateToFundWallet() {
@@ -423,7 +481,6 @@ class _AdvertFormPageState extends State<AdvertFormPage> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final textTheme = theme.textTheme;
-    final hasSufficient = _currentBalance >= _totalPrice;
 
     return Scaffold(
       backgroundColor: colorScheme.background,
@@ -439,7 +496,7 @@ class _AdvertFormPageState extends State<AdvertFormPage> {
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(
-          'Create Advert',
+          'Complete Order Details',
           style: GoogleFonts.inter(
             color: colorScheme.onSurface,
             fontWeight: FontWeight.w700,
@@ -458,32 +515,30 @@ class _AdvertFormPageState extends State<AdvertFormPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildTaskHeader(theme, colorScheme),
+                    _buildOrderSummary(theme, colorScheme),
                     const SizedBox(height: 24),
                     _buildMediaTypeSelector(colorScheme, textTheme),
                     const SizedBox(height: 20),
                     _buildMediaUploadSection(colorScheme, textTheme),
                     const SizedBox(height: 20),
-                    _buildPlatformSection(colorScheme, textTheme),
+                    _buildCaptionSection(colorScheme, textTheme),
                     const SizedBox(height: 20),
-                    _buildQuantitySection(colorScheme, textTheme),
+                    _buildLinkSection(colorScheme, textTheme),
                     const SizedBox(height: 20),
                     _buildLocationSection(colorScheme, textTheme),
-                    const SizedBox(height: 20),
-                    _buildCaptionSection(colorScheme, textTheme),
                     const SizedBox(height: 40),
                   ],
                 ),
               ),
             ),
           ),
-          _buildPaymentBar(hasSufficient, colorScheme, textTheme),
+          _buildSubmitButton(colorScheme, textTheme),
         ],
       ),
     );
   }
 
-  Widget _buildTaskHeader(ThemeData theme, ColorScheme colorScheme) {
+  Widget _buildOrderSummary(ThemeData theme, ColorScheme colorScheme) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -498,70 +553,103 @@ class _AdvertFormPageState extends State<AdvertFormPage> {
           ),
         ],
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              color: PlatformHelper.getPlatformColor(
-                widget.task.platforms.isNotEmpty
-                    ? widget.task.platforms.first
-                    : 'social',
-              ).withOpacity(0.1),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Center(
-              child: Icon(
-                TaskHelper.getTaskCategoryIcon(widget.task.category),
-                color: colorScheme.primary,
-                size: 28,
+          Row(
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: PlatformHelper.getPlatformColor(
+                    widget.platform,
+                  ).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Center(
+                  child: Icon(
+                    PlatformHelper.getPlatformIcon(widget.platform),
+                    color: PlatformHelper.getPlatformColor(widget.platform),
+                    size: 28,
+                  ),
+                ),
               ),
-            ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  widget.task.title,
-                  style: GoogleFonts.inter(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 15,
-                    color: colorScheme.onSurface,
-                    height: 1.3,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                RichText(
-                  text: TextSpan(
-                    style: GoogleFonts.inter(
-                      fontSize: 14,
-                      color: colorScheme.onSurface.withOpacity(0.7),
-                    ),
-                    children: [
-                      const TextSpan(text: 'Pricing: '),
-                      TextSpan(
-                        text: '₦${widget.task.price.toStringAsFixed(0)} per Advert Post',
-                        style: const TextStyle(fontWeight: FontWeight.w700),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      widget.task.title,
+                      style: GoogleFonts.inter(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 15,
+                        color: colorScheme.onSurface,
+                        height: 1.3,
                       ),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(height: 6),
+                    RichText(
+                      text: TextSpan(
+                        style: GoogleFonts.inter(
+                          fontSize: 14,
+                          color: colorScheme.onSurface.withOpacity(0.7),
+                        ),
+                        children: [
+                          TextSpan(text: 'Platform: '),
+                          TextSpan(
+                            text: PlatformHelper.getPlatformDisplayName(
+                              widget.platform,
+                            ),
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    RichText(
+                      text: TextSpan(
+                        style: GoogleFonts.inter(
+                          fontSize: 14,
+                          color: colorScheme.onSurface.withOpacity(0.7),
+                        ),
+                        children: [
+                          TextSpan(text: 'Quantity: '),
+                          TextSpan(
+                            text: '${widget.quantity} posts',
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  widget.task.description,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.inter(
-                    fontSize: 13,
-                    color: colorScheme.onSurface.withOpacity(0.6),
-                    height: 1.4,
-                  ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Divider(color: colorScheme.outline.withOpacity(0.2)),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Total Amount:',
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  color: colorScheme.onSurface.withOpacity(0.7),
                 ),
-              ],
-            ),
+              ),
+              Text(
+                FormFieldHelper.formatCurrency(_totalPrice),
+                style: GoogleFonts.inter(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                  color: Colors.green,
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -633,28 +721,31 @@ class _AdvertFormPageState extends State<AdvertFormPage> {
             color: isSelected ? colorScheme.primary : colorScheme.surface,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: isSelected
-                  ? colorScheme.primary
-                  : colorScheme.outline.withOpacity(0.3),
+              color:
+                  isSelected
+                      ? colorScheme.primary
+                      : colorScheme.outline.withOpacity(0.3),
               width: isSelected ? 2 : 1,
             ),
-            boxShadow: isSelected
-                ? [
-                    BoxShadow(
-                      color: colorScheme.primary.withOpacity(0.2),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
-                    ),
-                  ]
-                : null,
+            boxShadow:
+                isSelected
+                    ? [
+                      BoxShadow(
+                        color: colorScheme.primary.withOpacity(0.2),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ]
+                    : null,
           ),
           child: Column(
             children: [
               Icon(
                 icon,
-                color: isSelected
-                    ? Colors.white
-                    : colorScheme.onSurface.withOpacity(0.7),
+                color:
+                    isSelected
+                        ? Colors.white
+                        : colorScheme.onSurface.withOpacity(0.7),
                 size: 28,
               ),
               const SizedBox(height: 8),
@@ -663,18 +754,19 @@ class _AdvertFormPageState extends State<AdvertFormPage> {
                 style: GoogleFonts.inter(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
-                  color: isSelected
-                      ? Colors.white
-                      : colorScheme.onSurface.withOpacity(0.7),
+                  color:
+                      isSelected
+                          ? Colors.white
+                          : colorScheme.onSurface.withOpacity(0.7),
                 ),
               ),
             ],
           ),
         ),
-      ) 
+      ),
     );
   }
-  
+
   Widget _buildMediaUploadSection(
     ColorScheme colorScheme,
     TextTheme textTheme,
@@ -718,78 +810,81 @@ class _AdvertFormPageState extends State<AdvertFormPage> {
             width: double.infinity,
             height: 160,
             decoration: BoxDecoration(
-              color: _selectedMediaFiles.isEmpty
-                  ? colorScheme.surface
-                  : colorScheme.primary.withOpacity(0.05),
+              color:
+                  _selectedMediaFiles.isEmpty
+                      ? colorScheme.surface
+                      : colorScheme.primary.withOpacity(0.05),
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
-                color: _selectedMediaFiles.isEmpty
-                    ? colorScheme.outline.withOpacity(0.3)
-                    : colorScheme.primary.withOpacity(0.3),
+                color:
+                    _selectedMediaFiles.isEmpty
+                        ? colorScheme.outline.withOpacity(0.3)
+                        : colorScheme.primary.withOpacity(0.3),
                 width: _selectedMediaFiles.isEmpty ? 1 : 2,
               ),
             ),
-            child: _selectedMediaFiles.isEmpty
-                ? Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        _selectedMediaType == MediaType.photo
-                            ? Icons.photo_library_outlined
-                            : Icons.video_library_outlined,
-                        size: 48,
-                        color: colorScheme.onSurface.withOpacity(0.3),
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        'Tap to upload ${_selectedMediaType.name}s',
-                        style: GoogleFonts.inter(
-                          fontWeight: FontWeight.w600,
-                          color: colorScheme.onSurface.withOpacity(0.5),
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Max $maxFiles • $fileSizeLimit each',
-                        style: GoogleFonts.inter(
-                          fontSize: 12,
-                          color: colorScheme.onSurface.withOpacity(0.4),
-                        ),
-                      ),
-                    ],
-                  )
-                : Center(
-                    child: Column(
+            child:
+                _selectedMediaFiles.isEmpty
+                    ? Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Icon(
                           _selectedMediaType == MediaType.photo
-                              ? Icons.photo_library
-                              : Icons.video_library,
+                              ? Icons.photo_library_outlined
+                              : Icons.video_library_outlined,
                           size: 48,
-                          color: colorScheme.primary.withOpacity(0.7),
+                          color: colorScheme.onSurface.withOpacity(0.3),
                         ),
                         const SizedBox(height: 12),
                         Text(
-                          '${_selectedMediaFiles.length} ${_selectedMediaType.name}${_selectedMediaFiles.length > 1 ? 's' : ''} selected',
+                          'Tap to upload ${_selectedMediaType.name}s',
                           style: GoogleFonts.inter(
                             fontWeight: FontWeight.w600,
-                            color: colorScheme.onSurface,
+                            color: colorScheme.onSurface.withOpacity(0.5),
                           ),
                         ),
-                        if (remainingSlots > 0) ...[
-                          const SizedBox(height: 4),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Max $maxFiles • $fileSizeLimit each',
+                          style: GoogleFonts.inter(
+                            fontSize: 12,
+                            color: colorScheme.onSurface.withOpacity(0.4),
+                          ),
+                        ),
+                      ],
+                    )
+                    : Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            _selectedMediaType == MediaType.photo
+                                ? Icons.photo_library
+                                : Icons.video_library,
+                            size: 48,
+                            color: colorScheme.primary.withOpacity(0.7),
+                          ),
+                          const SizedBox(height: 12),
                           Text(
-                            'Tap to add ${remainingSlots} more',
+                            '${_selectedMediaFiles.length} ${_selectedMediaType.name}${_selectedMediaFiles.length > 1 ? 's' : ''} selected',
                             style: GoogleFonts.inter(
-                              fontSize: 12,
-                              color: colorScheme.onSurface.withOpacity(0.6),
+                              fontWeight: FontWeight.w600,
+                              color: colorScheme.onSurface,
                             ),
                           ),
+                          if (remainingSlots > 0) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              'Tap to add ${remainingSlots} more',
+                              style: GoogleFonts.inter(
+                                fontSize: 12,
+                                color: colorScheme.onSurface.withOpacity(0.6),
+                              ),
+                            ),
+                          ],
                         ],
-                      ],
+                      ),
                     ),
-                  ),
           ),
         ),
 
@@ -841,7 +936,7 @@ class _AdvertFormPageState extends State<AdvertFormPage> {
                     _videoControllers.clear();
                     _videoIsPlaying.clear();
                     _videoDurations.clear();
-                    
+
                     setState(() => _selectedMediaFiles.clear());
                   },
                   icon: Icon(Icons.delete, color: colorScheme.error),
@@ -889,90 +984,96 @@ class _AdvertFormPageState extends State<AdvertFormPage> {
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: colorScheme.outline.withOpacity(0.3)),
-              color: isVideo ? Colors.black.withOpacity(0.1) : colorScheme.surface,
+              color:
+                  isVideo ? Colors.black.withOpacity(0.1) : colorScheme.surface,
             ),
-            child: isVideo && controller != null && controller.value.isInitialized
-                ? ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Stack(
-                      children: [
-                        VideoPlayer(controller),
-                        // Video overlay
-                        Container(
-                          color: Colors.black.withOpacity(isPlaying ? 0 : 0.4),
-                          child: Center(
-                            child: Icon(
-                              isPlaying ? Icons.pause_circle : Icons.play_circle,
-                              size: 32,
-                              color: Colors.white.withOpacity(0.8),
+            child:
+                isVideo && controller != null && controller.value.isInitialized
+                    ? ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Stack(
+                        children: [
+                          VideoPlayer(controller),
+                          // Video overlay
+                          Container(
+                            color: Colors.black.withOpacity(
+                              isPlaying ? 0 : 0.4,
+                            ),
+                            child: Center(
+                              child: Icon(
+                                isPlaying
+                                    ? Icons.pause_circle
+                                    : Icons.play_circle,
+                                size: 32,
+                                color: Colors.white.withOpacity(0.8),
+                              ),
                             ),
                           ),
-                        ),
-                        // Video duration badge
-                        if (duration != null)
-                          Positioned(
-                            bottom: 4,
-                            right: 4,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 4,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.black.withOpacity(0.7),
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: Text(
-                                _formatDuration(duration),
-                                style: GoogleFonts.inter(
-                                  fontSize: 9,
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w600,
+                          // Video duration badge
+                          if (duration != null)
+                            Positioned(
+                              bottom: 4,
+                              right: 4,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withOpacity(0.7),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  _formatDuration(duration),
+                                  style: GoogleFonts.inter(
+                                    fontSize: 9,
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w600,
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                      ],
-                    ),
-                  )
-                : isVideo
+                        ],
+                      ),
+                    )
+                    : isVideo
                     ? Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.videocam,
-                              size: 24,
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.videocam,
+                            size: 24,
+                            color: colorScheme.onSurface.withOpacity(0.5),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Loading...',
+                            style: GoogleFonts.inter(
+                              fontSize: 9,
                               color: colorScheme.onSurface.withOpacity(0.5),
                             ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Loading...',
-                              style: GoogleFonts.inter(
-                                fontSize: 9,
-                                color: colorScheme.onSurface.withOpacity(0.5),
-                              ),
-                            ),
-                          ],
-                        ),
-                      )
-                    : ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: Image.file(
-                          file,
-                          fit: BoxFit.cover,
-                          width: 80,
-                          height: 80,
-                          errorBuilder: (context, error, stackTrace) {
-                            return Center(
-                              child: Icon(
-                                Icons.broken_image,
-                                color: colorScheme.onSurface.withOpacity(0.3),
-                              ),
-                            );
-                          },
-                        ),
+                          ),
+                        ],
                       ),
+                    )
+                    : ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Image.file(
+                        file,
+                        fit: BoxFit.cover,
+                        width: 80,
+                        height: 80,
+                        errorBuilder: (context, error, stackTrace) {
+                          return Center(
+                            child: Icon(
+                              Icons.broken_image,
+                              color: colorScheme.onSurface.withOpacity(0.3),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
           ),
 
           // File Number Badge
@@ -1015,242 +1116,6 @@ class _AdvertFormPageState extends State<AdvertFormPage> {
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildPlatformSection(ColorScheme colorScheme, TextTheme textTheme) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Target Platform *',
-          style: GoogleFonts.inter(
-            fontWeight: FontWeight.w600,
-            fontSize: 14,
-            color: colorScheme.onSurface,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          decoration: BoxDecoration(
-            color: colorScheme.surface,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: colorScheme.outline.withOpacity(0.3)),
-          ),
-          child: DropdownButtonHideUnderline(
-            child: DropdownButton<String>(
-              value: _selectedPlatform,
-              isExpanded: true,
-              icon: Icon(
-                Icons.expand_more,
-                color: colorScheme.onSurface.withOpacity(0.5),
-              ),
-              hint: Text(
-                'Select Platform',
-                style: GoogleFonts.inter(
-                  color: colorScheme.onSurface.withOpacity(0.5),
-                ),
-              ),
-              items: widget.task.platforms.map((platform) {
-                return DropdownMenuItem<String>(
-                  value: platform,
-                  child: Row(
-                    children: [
-                      Icon(
-                        PlatformHelper.getPlatformIcon(platform),
-                        color: PlatformHelper.getPlatformColor(platform),
-                        size: 20,
-                      ),
-                      const SizedBox(width: 12),
-                      Text(
-                        PlatformHelper.getPlatformDisplayName(platform),
-                        style: GoogleFonts.inter(
-                          color: colorScheme.onSurface,
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              }).toList(),
-              onChanged: (value) => setState(() => _selectedPlatform = value),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildQuantitySection(ColorScheme colorScheme, TextTheme textTheme) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Number of Adverts *',
-          style: GoogleFonts.inter(
-            fontWeight: FontWeight.w600,
-            fontSize: 14,
-            color: colorScheme.onSurface,
-          ),
-        ),
-        const SizedBox(height: 8),
-        TextFormField(
-          controller: _quantityController,
-          keyboardType: TextInputType.number,
-          style: GoogleFonts.inter(color: colorScheme.onSurface, fontSize: 15),
-          decoration: InputDecoration(
-            hintText: 'How many posts?',
-            hintStyle: GoogleFonts.inter(
-              color: colorScheme.onSurface.withOpacity(0.4),
-            ),
-            prefixIcon: Icon(
-              Icons.people,
-              color: colorScheme.onSurface.withOpacity(0.5),
-            ),
-            filled: true,
-            fillColor: colorScheme.surface,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(
-                color: colorScheme.outline.withOpacity(0.3),
-              ),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(
-                color: colorScheme.outline.withOpacity(0.3),
-              ),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: colorScheme.primary, width: 2),
-            ),
-          ),
-          validator: (value) {
-            if (value == null || value.isEmpty) return 'Required';
-            final quantity = int.tryParse(value);
-            if (quantity == null || quantity < 1) return 'Minimum is 1';
-            if (quantity > 1000) return 'Maximum is 1000';
-            return null;
-          },
-        ),
-      ],
-    );
-  }
-
-  Widget _buildLocationSection(ColorScheme colorScheme, TextTheme textTheme) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Target Location (Optional)',
-          style: GoogleFonts.inter(
-            fontWeight: FontWeight.w600,
-            fontSize: 14,
-            color: colorScheme.onSurface,
-          ),
-        ),
-        const SizedBox(height: 8),
-        // State Dropdown
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          decoration: BoxDecoration(
-            color: colorScheme.surface,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: colorScheme.outline.withOpacity(0.3)),
-          ),
-          child: _isLoadingStates
-              ? const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 16),
-                  child: Center(child: CircularProgressIndicator()),
-                )
-              : DropdownButtonHideUnderline(
-                  child: DropdownButton<StateModel>(
-                    value: _selectedState,
-                    isExpanded: true,
-                    icon: Icon(
-                      Icons.expand_more,
-                      color: colorScheme.onSurface.withOpacity(0.5),
-                    ),
-                    hint: Text(
-                      'All Nigeria',
-                      style: GoogleFonts.inter(
-                        color: colorScheme.onSurface.withOpacity(0.5),
-                      ),
-                    ),
-                    items: [
-                      const DropdownMenuItem<StateModel>(
-                        value: null,
-                        child: Text('All Nigeria'),
-                      ),
-                      ..._states.map((state) {
-                        return DropdownMenuItem<StateModel>(
-                          value: state,
-                          child: Text(
-                            state.name,
-                            style: GoogleFonts.inter(
-                              color: colorScheme.onSurface,
-                            ),
-                          ),
-                        );
-                      }).toList(),
-                    ],
-                    onChanged: (value) {
-                      setState(() {
-                        _selectedState = value;
-                        _selectedLga = null;
-                      });
-                      if (value != null) _fetchLgas(value.id);
-                    },
-                  ),
-                ),
-        ),
-
-        // LGA Dropdown
-        if (_selectedState != null) ...[
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            decoration: BoxDecoration(
-              color: colorScheme.surface,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: colorScheme.outline.withOpacity(0.3)),
-            ),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<LgaModel>(
-                value: _selectedLga,
-                isExpanded: true,
-                icon: Icon(
-                  Icons.expand_more,
-                  color: colorScheme.onSurface.withOpacity(0.5),
-                ),
-                hint: Text(
-                  'All Locations',
-                  style: GoogleFonts.inter(
-                    color: colorScheme.onSurface.withOpacity(0.5),
-                  ),
-                ),
-                items: [
-                  const DropdownMenuItem<LgaModel>(
-                    value: null,
-                    child: Text('All Locations'),
-                  ),
-                  ..._lgas.map((lga) {
-                    return DropdownMenuItem<LgaModel>(
-                      value: lga,
-                      child: Text(
-                        lga.name,
-                        style: GoogleFonts.inter(color: colorScheme.onSurface),
-                      ),
-                    );
-                  }).toList(),
-                ],
-                onChanged: (value) => setState(() => _selectedLga = value),
-              ),
-            ),
-          ),
-        ],
-      ],
     );
   }
 
@@ -1307,11 +1172,271 @@ class _AdvertFormPageState extends State<AdvertFormPage> {
     );
   }
 
-  Widget _buildPaymentBar(
-    bool hasSufficient,
-    ColorScheme colorScheme,
-    TextTheme textTheme,
-  ) {
+  Widget _buildLinkSection(ColorScheme colorScheme, TextTheme textTheme) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Target Link (Optional)',
+          style: GoogleFonts.inter(
+            fontWeight: FontWeight.w600,
+            fontSize: 14,
+            color: colorScheme.onSurface,
+          ),
+        ),
+        const SizedBox(height: 8),
+        TextFormField(
+          controller: _linkController,
+          style: GoogleFonts.inter(color: colorScheme.onSurface, fontSize: 15),
+          decoration: InputDecoration(
+            hintText: 'https://yourwebsite.com',
+            hintStyle: GoogleFonts.inter(
+              color: colorScheme.onSurface.withOpacity(0.4),
+            ),
+            prefixIcon: Icon(
+              Icons.link,
+              color: colorScheme.onSurface.withOpacity(0.5),
+            ),
+            filled: true,
+            fillColor: colorScheme.surface,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(
+                color: colorScheme.outline.withOpacity(0.3),
+              ),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(
+                color: colorScheme.outline.withOpacity(0.3),
+              ),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: colorScheme.primary, width: 2),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLocationSection(ColorScheme colorScheme, TextTheme textTheme) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Target Location (Optional)',
+          style: GoogleFonts.inter(
+            fontWeight: FontWeight.w600,
+            fontSize: 14,
+            color: colorScheme.onSurface,
+          ),
+        ),
+        const SizedBox(height: 8),
+        // State Dropdown
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          decoration: BoxDecoration(
+            color: colorScheme.surface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: colorScheme.outline.withOpacity(0.3)),
+          ),
+          child:
+              _isLoadingStates
+                  ? const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 16),
+                    child: Center(child: CircularProgressIndicator()),
+                  )
+                  : DropdownButtonHideUnderline(
+                    child: DropdownButton<StateModel>(
+                      value: _selectedState,
+                      isExpanded: true,
+                      icon: Icon(
+                        Icons.expand_more,
+                        color: colorScheme.onSurface.withOpacity(0.5),
+                      ),
+                      hint: Text(
+                        'All Nigeria',
+                        style: GoogleFonts.inter(
+                          color: colorScheme.onSurface.withOpacity(0.5),
+                        ),
+                      ),
+                      items: [
+                        const DropdownMenuItem<StateModel>(
+                          value: null,
+                          child: Text('All Nigeria'),
+                        ),
+                        ..._states.map((state) {
+                          return DropdownMenuItem<StateModel>(
+                            value: state,
+                            child: Text(
+                              state.name,
+                              style: GoogleFonts.inter(
+                                color: colorScheme.onSurface,
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ],
+                      onChanged: (value) {
+                        setState(() {
+                          _selectedState = value;
+                          _selectedLga = null;
+                        });
+                        if (value != null) _fetchLgas(value.id);
+                      },
+                    ),
+                  ),
+        ),
+
+        // LGA Dropdown
+        if (_selectedState != null) ...[
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            decoration: BoxDecoration(
+              color: colorScheme.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: colorScheme.outline.withOpacity(0.3)),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<LgaModel>(
+                value: _selectedLga,
+                isExpanded: true,
+                icon: Icon(
+                  Icons.expand_more,
+                  color: colorScheme.onSurface.withOpacity(0.5),
+                ),
+                hint: Text(
+                  'All Locations',
+                  style: GoogleFonts.inter(
+                    color: colorScheme.onSurface.withOpacity(0.5),
+                  ),
+                ),
+                items: [
+                  const DropdownMenuItem<LgaModel>(
+                    value: null,
+                    child: Text('All Locations'),
+                  ),
+                  ..._lgas.map((lga) {
+                    return DropdownMenuItem<LgaModel>(
+                      value: lga,
+                      child: Text(
+                        lga.name,
+                        style: GoogleFonts.inter(color: colorScheme.onSurface),
+                      ),
+                    );
+                  }).toList(),
+                ],
+                onChanged: (value) => setState(() => _selectedLga = value),
+              ),
+            ),
+          ),
+        ],
+
+        // Gender Selection
+        const SizedBox(height: 16),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Target Gender',
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                color: colorScheme.onSurface.withOpacity(0.7),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              children:
+                  ['All Gender', 'Male', 'Female'].map((gender) {
+                    final isSelected = _selectedGender == gender;
+                    return ChoiceChip(
+                      label: Text(gender),
+                      selected: isSelected,
+                      onSelected:
+                          (selected) =>
+                              setState(() => _selectedGender = gender),
+                      selectedColor: colorScheme.primary,
+                      backgroundColor: colorScheme.surface,
+                      labelStyle: GoogleFonts.inter(
+                        color:
+                            isSelected ? Colors.white : colorScheme.onSurface,
+                        fontSize: 13,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        side: BorderSide(
+                          color:
+                              isSelected
+                                  ? colorScheme.primary
+                                  : colorScheme.outline.withOpacity(0.3),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+            ),
+          ],
+        ),
+
+        // Religion Selection
+        const SizedBox(height: 16),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Target Religion',
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                color: colorScheme.onSurface.withOpacity(0.7),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              children:
+                  ['All Religion', 'Christianity', 'Islam', 'Others'].map((
+                    religion,
+                  ) {
+                    final isSelected = _selectedReligion == religion;
+                    return ChoiceChip(
+                      label: Text(religion),
+                      selected: isSelected,
+                      onSelected:
+                          (selected) =>
+                              setState(() => _selectedReligion = religion),
+                      selectedColor: colorScheme.primary,
+                      backgroundColor: colorScheme.surface,
+                      labelStyle: GoogleFonts.inter(
+                        color:
+                            isSelected ? Colors.white : colorScheme.onSurface,
+                        fontSize: 13,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        side: BorderSide(
+                          color:
+                              isSelected
+                                  ? colorScheme.primary
+                                  : colorScheme.outline.withOpacity(0.3),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSubmitButton(ColorScheme colorScheme, TextTheme textTheme) {
+    final isFormValid =
+        _selectedMediaFiles.isNotEmpty &&
+        _captionController.text.trim().isNotEmpty;
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -1326,134 +1451,48 @@ class _AdvertFormPageState extends State<AdvertFormPage> {
         borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
       ),
       child: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Order Summary
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: colorScheme.primary.withOpacity(0.05),
+        child: SizedBox(
+          width: double.infinity,
+          child: ElevatedButton(
+            onPressed: _isLoading || !isFormValid ? null : _submitOrder,
+            style: ElevatedButton.styleFrom(
+              backgroundColor:
+                  isFormValid
+                      ? colorScheme.primary
+                      : colorScheme.primary.withOpacity(0.3),
+              foregroundColor:
+                  isFormValid
+                      ? (colorScheme.primary.computeLuminance() > 0.5
+                          ? Colors.black
+                          : Colors.white)
+                      : colorScheme.onSurface.withOpacity(0.38),
+              disabledBackgroundColor: colorScheme.primary.withOpacity(0.2),
+              disabledForegroundColor: colorScheme.onSurface.withOpacity(0.38),
+              minimumSize: const Size.fromHeight(50),
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: Row(
-                children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Order Summary',
-                        style: GoogleFonts.inter(
-                          fontSize: 12,
-                          color: colorScheme.onSurface.withOpacity(0.6),
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        FormFieldHelper.formatCurrency(_totalPrice),
-                        style: GoogleFonts.inter(
-                          fontSize: 22,
-                          fontWeight: FontWeight.w800,
-                          color: colorScheme.primary,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const Spacer(),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(
-                        'Balance',
-                        style: GoogleFonts.inter(
-                          fontSize: 12,
-                          color: colorScheme.onSurface.withOpacity(0.6),
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        FormFieldHelper.formatCurrency(_currentBalance),
-                        style: GoogleFonts.inter(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          color: hasSufficient ? Colors.green : Colors.orange,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
+              elevation: 0,
             ),
-            const SizedBox(height: 16),
-
-            // Submit Button
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '${_selectedMediaFiles.length} ${_selectedMediaType.name}${_selectedMediaFiles.length > 1 ? 's' : ''} • $_quantity posts',
-                        style: GoogleFonts.inter(
-                          fontSize: 13,
-                          color: colorScheme.onSurface.withOpacity(0.7),
-                        ),
+            child:
+                _isLoading
+                    ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        color: Colors.white,
+                        strokeWidth: 2,
                       ),
-                      if (_selectedPlatform != null) ...[
-                        const SizedBox(height: 2),
-                        Text(
-                          PlatformHelper.getPlatformDisplayName(
-                            _selectedPlatform!,
-                          ),
-                          style: GoogleFonts.inter(
-                            fontSize: 13,
-                            color: colorScheme.onSurface.withOpacity(0.7),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-                SizedBox(
-                  width: 180,
-                  child: ElevatedButton(
-                    onPressed: _isLoading
-                        ? null
-                        : (hasSufficient
-                            ? _submitOrder
-                            : _navigateToFundWallet),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor:
-                          hasSufficient ? colorScheme.primary : Colors.orange,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                    )
+                    : Text(
+                      'COMPLETE ORDER',
+                      style: GoogleFonts.inter(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
                       ),
-                      elevation: 0,
                     ),
-                    child: _isLoading
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              color: Colors.white,
-                              strokeWidth: 2,
-                            ),
-                          )
-                        : Text(
-                            hasSufficient ? 'CREATE ORDER' : 'FUND WALLET',
-                            style: GoogleFonts.inter(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                  ),
-                ),
-              ],
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -1470,160 +1509,153 @@ class _AdvertFormPageState extends State<AdvertFormPage> {
     );
   }
 
-  void _showInsufficientBalanceDialog() {
+  void _showSuccessDialog() {
     showDialog(
       context: context,
-      builder: (context) => Dialog(
-        backgroundColor: Theme.of(context).colorScheme.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.account_balance_wallet,
-                size: 60,
-                color: Colors.orange,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Insufficient Balance',
-                style: GoogleFonts.inter(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                  color: Theme.of(context).colorScheme.onSurface,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'You need ₦${(_totalPrice - _currentBalance).toStringAsFixed(0)} more to complete this order.',
-                textAlign: TextAlign.center,
-                style: GoogleFonts.inter(
-                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
-                ),
-              ),
-              const SizedBox(height: 24),
-              Row(
+      barrierDismissible: false,
+      builder:
+          (context) => Dialog(
+            backgroundColor: Theme.of(context).colorScheme.surface,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => Navigator.pop(context),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: Text(
-                        'CANCEL',
-                        style: GoogleFonts.inter(
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
+                  const Icon(Icons.check_circle, size: 80, color: Colors.green),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Order Created Successfully!',
+                    style: GoogleFonts.inter(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
+                  const SizedBox(height: 12),
+                  Text(
+                    'Your advert order has been submitted and payment processed.',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.inter(
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.onSurface.withOpacity(0.7),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.green.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.green.withOpacity(0.3)),
+                    ),
+                    child: Column(
+                      children: [
+                        Text(
+                          'Order Details',
+                          style: GoogleFonts.inter(
+                            fontWeight: FontWeight.w600,
+                            color: Colors.green,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Quantity:',
+                              style: GoogleFonts.inter(color: Colors.grey),
+                            ),
+                            Text(
+                              '${widget.quantity} posts',
+                              style: GoogleFonts.inter(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Platform:',
+                              style: GoogleFonts.inter(color: Colors.grey),
+                            ),
+                            Text(
+                              PlatformHelper.getPlatformDisplayName(
+                                widget.platform,
+                              ),
+                              style: GoogleFonts.inter(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Total Amount:',
+                              style: GoogleFonts.inter(color: Colors.grey),
+                            ),
+                            Text(
+                              FormFieldHelper.formatCurrency(_totalPrice),
+                              style: GoogleFonts.inter(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w800,
+                                color: Colors.green,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  SizedBox(
+                    width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: () {
-                        Navigator.pop(context);
-                        _navigateToFundWallet();
-                      },
+                      onPressed:
+                          () => Navigator.popUntil(
+                            context,
+                            (route) => route.isFirst,
+                          ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Theme.of(context).colorScheme.primary,
                         foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        padding: const EdgeInsets.symmetric(vertical: 16),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
                       ),
                       child: Text(
-                        'FUND WALLET',
-                        style: GoogleFonts.inter(
-                          fontWeight: FontWeight.w600,
-                        ),
+                        'GO TO DASHBOARD',
+                        style: GoogleFonts.inter(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      // Optionally navigate to order details
+                    },
+                    child: Text(
+                      'View Order Details',
+                      style: GoogleFonts.inter(
+                        color: Theme.of(context).colorScheme.primary,
                       ),
                     ),
                   ),
                 ],
               ),
-            ],
+            ),
           ),
-        ),
-      ),
-    );
-  }
-
-  void _showSuccessDialog() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => Dialog(
-        backgroundColor: Theme.of(context).colorScheme.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.check_circle, size: 80, color: Colors.green),
-              const SizedBox(height: 16),
-              Text(
-                'Order Created!',
-                style: GoogleFonts.inter(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w800,
-                  color: Theme.of(context).colorScheme.onSurface,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'Your advert has been submitted successfully.',
-                textAlign: TextAlign.center,
-                style: GoogleFonts.inter(
-                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                FormFieldHelper.formatCurrency(_totalPrice),
-                style: GoogleFonts.inter(
-                  fontSize: 24,
-                  fontWeight: FontWeight.w800,
-                  color: Colors.green,
-                ),
-              ),
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () => Navigator.popUntil(
-                    context,
-                    (route) => route.isFirst,
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Theme.of(context).colorScheme.primary,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  child: Text(
-                    'GO TO DASHBOARD',
-                    style: GoogleFonts.inter(fontWeight: FontWeight.w600),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 }

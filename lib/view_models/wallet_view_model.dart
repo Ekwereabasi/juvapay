@@ -400,29 +400,8 @@ class WalletViewModel extends ChangeNotifier {
     }
   }
 
-  // Alternative transaction history method
-  Future<List<Transaction>> getTransactionHistoryAlt({
-    List<String>? types,
-    String? status,
-    DateTime? startDate,
-    DateTime? endDate,
-    int limit = 50,
-    int offset = 0,
-  }) async {
-    try {
-      return await _walletService.getTransactionHistoryAlt(
-        types: types,
-        status: status,
-        startDate: startDate,
-        endDate: endDate,
-        limit: limit,
-        offset: offset,
-      );
-    } catch (e) {
-      debugPrint('Error getting transaction history (alt): $e');
-      return [];
-    }
-  }
+  // Alternative transaction history method - REMOVED since it doesn't exist in updated service
+  // You can use getTransactionHistory instead
 
   // Get monthly statistics
   Future<TransactionSummary> getMonthlyStatistics({

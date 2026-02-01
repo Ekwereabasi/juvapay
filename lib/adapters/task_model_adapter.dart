@@ -31,19 +31,46 @@ class TaskModelAdapter {
   final String iconKey;
 
   @HiveField(8)
-  final bool isFeatured;
+  final String difficulty;
 
   @HiveField(9)
-  final List<String> tags;
+  final int? estimatedTime;
 
   @HiveField(10)
+  final String status;
+
+  @HiveField(11)
+  final int sortOrder;
+
+  @HiveField(12)
+  final bool isFeatured;
+
+  @HiveField(13)
+  final List<String> tags;
+
+  @HiveField(14)
   final Map<String, dynamic> metadata;
 
-  @HiveField(11) // Add this
-  final String? difficulty;
+  @HiveField(15)
+  final int version;
 
-  @HiveField(12) // Add this
-  final int? estimatedTime;
+  @HiveField(16)
+  final int minQuantity;
+
+  @HiveField(17)
+  final int maxQuantity;
+
+  @HiveField(18)
+  final List<dynamic> requirements;
+
+  @HiveField(19)
+  final List<dynamic> instructions;
+
+  @HiveField(20)
+  final double commissionRate;
+
+  @HiveField(21)
+  final double workerPayoutRate;
 
   TaskModelAdapter({
     required this.id,
@@ -54,11 +81,20 @@ class TaskModelAdapter {
     required this.description,
     required this.platforms,
     required this.iconKey,
+    required this.difficulty,
+    required this.estimatedTime,
+    required this.status,
+    required this.sortOrder,
     required this.isFeatured,
     required this.tags,
     required this.metadata,
-    required this.difficulty, // Add this
-    required this.estimatedTime, // Add this
+    required this.version,
+    required this.minQuantity,
+    required this.maxQuantity,
+    required this.requirements,
+    required this.instructions,
+    required this.commissionRate,
+    required this.workerPayoutRate,
   });
 
   // Convert TaskModel to TaskModelAdapter
@@ -72,11 +108,20 @@ class TaskModelAdapter {
       description: task.description,
       platforms: task.platforms,
       iconKey: task.iconKey,
+      difficulty: task.difficulty,
+      estimatedTime: task.estimatedTime,
+      status: task.status,
+      sortOrder: task.sortOrder,
       isFeatured: task.isFeatured,
       tags: task.tags,
       metadata: task.metadata,
-      difficulty: task.difficulty, // Add this
-      estimatedTime: task.estimatedTime, // Add this
+      version: task.version,
+      minQuantity: task.minQuantity,
+      maxQuantity: task.maxQuantity,
+      requirements: task.requirements,
+      instructions: task.instructions,
+      commissionRate: task.commissionRate,
+      workerPayoutRate: task.workerPayoutRate,
     );
   }
 
@@ -91,11 +136,20 @@ class TaskModelAdapter {
       description: description,
       platforms: platforms,
       iconKey: iconKey,
+      difficulty: difficulty,
+      estimatedTime: estimatedTime,
+      status: status,
+      sortOrder: sortOrder,
       isFeatured: isFeatured,
       tags: tags,
       metadata: metadata,
-      difficulty: difficulty, // Add this
-      estimatedTime: estimatedTime, // Add this
+      version: version,
+      minQuantity: minQuantity,
+      maxQuantity: maxQuantity,
+      requirements: requirements,
+      instructions: instructions,
+      commissionRate: commissionRate,
+      workerPayoutRate: workerPayoutRate,
     );
   }
 }

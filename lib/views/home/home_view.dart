@@ -1,9 +1,10 @@
 // views/home/home_view.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:juvapay/services/supabase_auth_service.dart';
 import '../../view_models/home_view_model.dart';
-import '../../models/task_models.dart';
-import '../../services/wallet_service.dart'; // Add this import for Transaction class
+import '../../view_models/wallet_view_model.dart';
+import '../../services/wallet_service.dart';
 import '../../widgets/offline_indicator.dart';
 import '../../services/cache_service.dart';
 import '../../services/network_service.dart';
@@ -14,76 +15,11 @@ import '../../views/settings/subpages/edit_profile_view.dart';
 import '../../views/settings/subpages/chat_with_support_view.dart';
 import '../../views/settings/subpages/fund_wallet_view.dart';
 import '../../views/settings/subpages/place_withdrawal_view.dart';
-import '../../views/earn/earn_select_view.dart';
+import '../../views/earn/earn_view.dart';
 import '../../views/advertise/advert_upload_page.dart';
 
 class HomeView extends StatelessWidget {
   const HomeView({super.key});
-
-  // Method to show the view as a draggable dialog
-  void _showEarnSelectionDialog(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder:
-          (context) => DraggableScrollableSheet(
-            initialChildSize: 0.8, // 80% of screen height initially
-            minChildSize: 0.5, // Minimum 50% of screen height
-            maxChildSize: 0.9, // Maximum 90% of screen height
-            expand: false, // Don't expand to fill entire screen
-            builder: (context, scrollController) {
-              return Container(
-                decoration: BoxDecoration(
-                  color: Theme.of(context).scaffoldBackgroundColor,
-                  borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(20),
-                    topRight: Radius.circular(20),
-                  ),
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // Drag handle (visual only)
-                    Container(
-                      margin: const EdgeInsets.only(top: 12, bottom: 8),
-                      width: 40,
-                      height: 5,
-                      decoration: BoxDecoration(
-                        color: Colors.grey[400],
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                    ),
-                    // Close button
-                    Align(
-                      alignment: Alignment.topRight,
-                      child: IconButton(
-                        padding: const EdgeInsets.only(right: 8),
-                        icon: const Icon(Icons.close),
-                        onPressed: () => Navigator.pop(context),
-                      ),
-                    ),
-                    // Your content
-                    Expanded(
-                      child: SingleChildScrollView(
-                        controller: scrollController,
-                        physics: const ClampingScrollPhysics(),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            EarnSelectionView(),
-                            const SizedBox(height: 20),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -93,14 +29,18 @@ class HomeView extends StatelessWidget {
     final dividerColor =
         isDark ? const Color(0xFF1E1E1E) : const Color(0xFFF5F5F5);
 
-    return ChangeNotifierProvider(
-      create:
-          (_) => HomeViewModel(
-            cacheService: context.read<CacheService>(),
-            networkService: context.read<NetworkService>(),
-          ),
-      child: Consumer<HomeViewModel>(
-        builder: (context, viewModel, child) {
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(
+          create:
+              (_) => HomeViewModel(
+                cacheService: context.read<CacheService>(),
+                networkService: context.read<NetworkService>(),
+              ),
+        ),
+      ],
+      child: Consumer2<HomeViewModel, WalletViewModel>(
+        builder: (context, viewModel, walletViewModel, child) {
           if (viewModel.isLoading) {
             return const Scaffold(
               body: Center(child: CircularProgressIndicator()),
@@ -151,36 +91,11 @@ class HomeView extends StatelessWidget {
                             primaryPurple,
                           ),
                           Divider(thickness: 8, color: dividerColor),
-                          _buildAvailableTasksHeader(context, viewModel),
-                          ...viewModel.tasks
-                              .take(3)
-                              .map(
-                                (task) =>
-                                    _buildTaskItem(context, viewModel, task),
-                              )
-                              .toList(),
-                          if (viewModel.tasks.length > 3)
-                            Padding(
-                              padding: const EdgeInsets.all(20.0),
-                              child: SizedBox(
-                                width: double.infinity,
-                                child: OutlinedButton(
-                                  onPressed:
-                                      () =>
-                                          viewModel.navigateToAllTasks(context),
-                                  style: OutlinedButton.styleFrom(
-                                    side: BorderSide(color: primaryPurple),
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 12,
-                                    ),
-                                  ),
-                                  child: Text(
-                                    'VIEW ALL TASKS (${viewModel.tasks.length})',
-                                    style: TextStyle(color: primaryPurple),
-                                  ),
-                                ),
-                              ),
-                            ),
+
+                          // Show available tasks only for members
+                          if (viewModel.isMember)
+                            _buildAvailableTasksSection(context, viewModel),
+
                           Divider(thickness: 8, color: dividerColor),
                           _buildRecentTransactionsSection(
                             context,
@@ -551,15 +466,21 @@ class HomeView extends StatelessWidget {
             style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 5),
-          const Text(
-            "Get Paid for Posting Adverts",
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          Text(
+            viewModel.isMember
+                ? "Continue Earning with Tasks"
+                : "Get Paid for Posting Adverts",
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 15),
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: () => _showEarnSelectionDialog(context),
+              onPressed:
+                  () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const EarnView()),
+                  ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: primaryColor,
                 padding: const EdgeInsets.symmetric(vertical: 12),
@@ -567,9 +488,9 @@ class HomeView extends StatelessWidget {
                   borderRadius: BorderRadius.circular(8),
                 ),
               ),
-              child: const Text(
-                "BECOME A MEMBER",
-                style: TextStyle(
+              child: Text(
+                viewModel.isMember ? "EARN NOW" : "BECOME A MEMBER",
+                style: const TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
                 ),
@@ -581,10 +502,12 @@ class HomeView extends StatelessWidget {
     );
   }
 
-  Widget _buildAvailableTasksHeader(
+  Widget _buildAvailableTasksSection(
     BuildContext context,
     HomeViewModel viewModel,
   ) {
+    final theme = Theme.of(context);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -597,12 +520,10 @@ class HomeView extends StatelessWidget {
                 "Available Tasks",
                 style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
               ),
-              if (viewModel.tasks.isNotEmpty)
+              if (viewModel.availableTasks.isNotEmpty)
                 Chip(
-                  label: Text('${viewModel.tasks.length} tasks'),
-                  backgroundColor: Theme.of(
-                    context,
-                  ).primaryColor.withOpacity(0.1),
+                  label: Text('${viewModel.availableTasks.length} tasks'),
+                  backgroundColor: theme.primaryColor.withOpacity(0.1),
                 ),
             ],
           ),
@@ -610,138 +531,266 @@ class HomeView extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20),
           child: Text(
-            "See our currently available tasks below.",
-            style: TextStyle(
-              color: Theme.of(context).textTheme.bodyMedium?.color,
-            ),
+            "Complete social media tasks and earn instantly",
+            style: TextStyle(color: theme.textTheme.bodyMedium?.color),
           ),
         ),
         const SizedBox(height: 20),
+
+        // Show limited tasks (3 max)
+        ...viewModel.availableTasks
+            .take(3)
+            .map((task) => _buildTaskCard(context, task))
+            .toList(),
+
+        // View all button if there are more tasks
+        if (viewModel.availableTasks.length > 3)
+          Padding(
+            padding: const EdgeInsets.all(20.0),
+            child: SizedBox(
+              width: double.infinity,
+              child: OutlinedButton(
+                onPressed: () => _navigateToTasks(context),
+                style: OutlinedButton.styleFrom(
+                  side: BorderSide(color: theme.primaryColor),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+                child: Text(
+                  'VIEW ALL TASKS (${viewModel.availableTasks.length})',
+                  style: TextStyle(color: theme.primaryColor),
+                ),
+              ),
+            ),
+          ),
       ],
     );
   }
 
-  Widget _buildTaskItem(
-    BuildContext context,
-    HomeViewModel viewModel,
-    TaskModel task,
-  ) {
-    final platforms = task.platforms;
-    final category = task.category;
+  Widget _buildTaskCard(BuildContext context, Map<String, dynamic> task) {
+    final theme = Theme.of(context);
+    final platform = task['platform']?.toString() ?? 'social';
+    final payout = (task['payout_amount'] as num?)?.toDouble() ?? 0.0;
+    final taskTitle = task['task_title']?.toString() ?? 'Social Media Task';
 
     return InkWell(
-      onTap: () => viewModel.navigateToTaskDetails(context, task),
+      onTap: () => _navigateToTaskDetails(context, task),
       child: Container(
-        padding: const EdgeInsets.all(20),
+        margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
         decoration: BoxDecoration(
-          border: Border(
-            bottom: BorderSide(color: Theme.of(context).dividerColor),
-          ),
+          color: theme.cardColor,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: theme.dividerColor),
         ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: viewModel.getTaskCategoryColor(category),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                viewModel.getTaskCategoryIcon(category),
-                color: Colors.white,
-                size: 28,
-              ),
-            ),
-            const SizedBox(width: 15),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
                 children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          task.title,
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: _getPlatformColor(platform).withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Center(
+                      child: Icon(
+                        _getPlatformIcon(platform),
+                        color: _getPlatformColor(platform),
+                        size: 20,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          taskTitle,
                           style: const TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: 16,
                           ),
                         ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color:
-                              category == 'advert' ? Colors.blue : Colors.green,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          category.toUpperCase(),
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    "Price: ${viewModel.formatCurrency(task.price)}",
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    task.description,
-                    style: TextStyle(
-                      color: Theme.of(context).textTheme.bodySmall?.color,
-                      fontSize: 13,
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      ...platforms
-                          .take(3)
-                          .map(
-                            (platform) => Padding(
-                              padding: const EdgeInsets.only(right: 4),
-                              child: Icon(
-                                viewModel.getPlatformIcon(platform),
-                                size: 16,
-                                color:
-                                    Theme.of(
-                                      context,
-                                    ).textTheme.bodySmall?.color,
-                              ),
-                            ),
-                          ),
-                      if (platforms.length > 3)
+                        const SizedBox(height: 4),
                         Text(
-                          '+${platforms.length - 3} more',
+                          platform.toUpperCase(),
                           style: TextStyle(
                             fontSize: 12,
-                            color: Theme.of(context).textTheme.bodySmall?.color,
+                            color: theme.hintColor,
                           ),
                         ),
-                    ],
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.green.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      '₦${payout.toStringAsFixed(2)}',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.green,
+                      ),
+                    ),
                   ),
                 ],
               ),
-            ),
-          ],
+              const SizedBox(height: 12),
+              Text(
+                task['task_description']?.toString() ??
+                    'Complete the social media task',
+                style: TextStyle(color: theme.textTheme.bodyMedium?.color),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 12),
+              if (task['requirements'] != null)
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Requirements:',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      task['requirements'].toString(),
+                      style: TextStyle(color: theme.hintColor, fontSize: 11),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => _claimTask(context, task),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: theme.primaryColor,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  child: const Text(
+                    'CLAIM TASK',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
+    );
+  }
+
+  Color _getPlatformColor(String platform) {
+    switch (platform.toLowerCase()) {
+      case 'facebook':
+        return const Color(0xFF1877F2);
+      case 'instagram':
+        return const Color(0xFFE4405F);
+      case 'x':
+      case 'twitter':
+        return Colors.black;
+      case 'tiktok':
+        return const Color(0xFF000000);
+      case 'whatsapp':
+        return const Color(0xFF25D366);
+      case 'youtube':
+        return const Color(0xFFFF0000);
+      default:
+        return Colors.blue;
+    }
+  }
+
+  IconData _getPlatformIcon(String platform) {
+    switch (platform.toLowerCase()) {
+      case 'facebook':
+        return Icons.facebook;
+      case 'instagram':
+        return Icons.camera_alt;
+      case 'x':
+      case 'twitter':
+        return Icons.alternate_email;
+      case 'tiktok':
+        return Icons.music_note;
+      case 'whatsapp':
+        return Icons.chat;
+      case 'youtube':
+        return Icons.play_circle_filled;
+      default:
+        return Icons.link;
+    }
+  }
+
+  void _navigateToTasks(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const EarnView()),
+    );
+  }
+
+  void _navigateToTaskDetails(BuildContext context, Map<String, dynamic> task) {
+    // Navigate to task details or directly claim
+    _claimTask(context, task);
+  }
+
+  Future<void> _claimTask(
+    BuildContext context,
+    Map<String, dynamic> task,
+  ) async {
+    final queueId = task['queue_id']?.toString();
+    if (queueId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Task not available'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    // You'll need to implement the claim logic here
+    // This would typically call SupabaseAuthService.claimTask()
+    showDialog(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Claim Task'),
+            content: const Text('Redirecting to task execution...'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  // Navigate to task execution
+                  // Navigator.push(context, MaterialPageRoute(builder: (context) => TaskExecutionScreen(taskData: task)));
+                },
+                child: const Text('Continue'),
+              ),
+            ],
+          ),
     );
   }
 
@@ -831,7 +880,7 @@ class HomeView extends StatelessWidget {
             backgroundColor: Theme.of(context).primaryColor.withOpacity(0.1),
             radius: 18,
             child: Icon(
-              viewModel.getTransactionIcon(type),
+              WalletService.getTransactionIcon(type),
               size: 20,
               color: Theme.of(context).primaryColor,
             ),
@@ -854,7 +903,7 @@ class HomeView extends StatelessWidget {
                   children: [
                     Chip(
                       label: Text(
-                        viewModel.formatTransactionType(type),
+                        WalletService.formatTransactionType(type),
                         style: const TextStyle(fontSize: 10),
                       ),
                       backgroundColor: Theme.of(
@@ -885,7 +934,7 @@ class HomeView extends StatelessWidget {
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 14,
-                  color: viewModel.getTransactionColor(type),
+                  color: transaction.isCredit ? Colors.green : Colors.red,
                 ),
               ),
               const SizedBox(height: 4),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import '../../../services/wallet_service.dart';
 import 'package:juvapay/view_models/wallet_view_model.dart';
 
 class TransactionHistoryPage extends StatefulWidget {
@@ -317,14 +318,18 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
             ),
           ],
         ),
-        onTap: () => _showTransactionDetails(context, transaction),
+        onTap:
+            () => _showTransactionDetails(
+              transaction,
+            ), // Fixed: removed context parameter
       ),
     );
   }
 
-  void _showFilterDialog(BuildContext context) {
+  void _showFilterDialog() {
+    // Fixed: removed BuildContext parameter
     showModalBottomSheet(
-      context: context,
+      context: context, // Use widget's context
       isScrollControlled: true,
       builder: (context) {
         return StatefulBuilder(
@@ -474,9 +479,10 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
     );
   }
 
-  void _showTransactionDetails(BuildContext context, Transaction transaction) {
+  void _showTransactionDetails(Transaction transaction) {
+    // Fixed: removed BuildContext parameter
     showModalBottomSheet(
-      context: context,
+      context: context, // Use widget's context
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -725,7 +731,7 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
         actions: [
           IconButton(
             icon: const Icon(Icons.filter_list),
-            onPressed: _showFilterDialog,
+            onPressed: _showFilterDialog, // Fixed: no parameters needed
           ),
         ],
       ),

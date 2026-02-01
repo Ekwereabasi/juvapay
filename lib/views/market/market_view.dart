@@ -1,58 +1,53 @@
-import 'dart:async'; // Add this import
+// views/marketplace/market_view.dart
+import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-import 'product_view.dart';
-import 'market_product_card.dart';
-import '../advertise/product_upload.dart';
+import 'package:provider/provider.dart';
+import 'package:juvapay/services/marketplace_service.dart';
+import 'package:juvapay/services/state_service.dart';
+import 'package:juvapay/models/marketplace_models.dart';
+import 'package:juvapay/models/location_models.dart';
+import 'package:juvapay/views/market/product_view.dart';
+import 'package:juvapay/widgets/market_product_card.dart';
+import 'package:juvapay/widgets/loading_indicator.dart';
+import 'package:juvapay/widgets/error_state.dart';
+import 'package:juvapay/views/market/marketplace_upload_page.dart';
+import 'package:juvapay/widgets/empty_state.dart'; // Add this line
+
 
 class MarketView extends StatefulWidget {
   const MarketView({super.key});
 
   @override
-  State<MarketView> createState() => _MarketViewPageState();
+  State<MarketView> createState() => _MarketViewState();
 }
 
-class _MarketViewPageState extends State<MarketView> {
-  final SupabaseClient _supabase = Supabase.instance.client;
+class _MarketViewState extends State<MarketView> {
+  final MarketplaceService _marketplaceService = MarketplaceService();
+  final StateService _stateService = StateService();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
-  // Product State
+  // State
+  List<MarketplaceProduct> _products = [];
   bool _isLoading = true;
   bool _hasError = false;
   String? _errorMessage;
-  List<dynamic> _products = [];
+  bool _hasMore = true;
+  int _currentPage = 0;
+  final int _pageSize = 20;
 
-  // Filter State
-  String _selectedSort = 'Most Popular';
-  bool _isLoadingStates = false;
-  bool _isLoadingLgas = false;
+  // Filters
+  String _selectedSort = 'newest';
+  int? _selectedStateId;
+  int? _selectedLgaId;
+  String? _selectedCategory;
+  String _searchQuery = '';
+
+  // Available filters
+  List<String> _categories = [];
   List<StateModel> _states = [];
-  List<LgaModel> _lgas = [];
-  StateModel? _selectedState;
-  LgaModel? _selectedLga;
-
-  final List<String> _sortOptions = [
-    'Most Popular',
-    'Newest',
-    'Price: Low to High',
-    'Price: High to Low',
-  ];
-
-  final List<String> _categories = [
-    "Health and Beauty",
-    "Grocery",
-    "Phones and Tablets",
-    "Baby Product",
-    "Computing",
-    "Fashion",
-    "Electronics",
-    "Home and Office",
-    "Books, Movies and Musics",
-    "Other Categories",
-  ];
-
-  // Track if this is initial load to prevent unnecessary snackbars
-  bool _isInitialLoad = true;
+  Map<int, List<LgaModel>> _lgasByState = {};
+  bool _loadingStates = false;
+  bool _loadingLgas = false;
 
   @override
   void initState() {
@@ -61,363 +56,160 @@ class _MarketViewPageState extends State<MarketView> {
   }
 
   Future<void> _initializeData() async {
-    try {
-      // Load both products and states in parallel for faster loading
-      await Future.wait([_fetchProducts(), _fetchStates()]);
-    } catch (e) {
-      debugPrint("Error initializing data: $e");
-      // Only show snackbar on subsequent loads, not initial load
-      if (!_isInitialLoad && mounted) {
-        _showSnackBar(
-          "Failed to load some data. Please try again.",
-          isError: true,
-        );
-      }
-    } finally {
-      _isInitialLoad = false;
-    }
-  }
-  
-
-  Future<void> _fetchProducts() async {
-    if (_products.isEmpty) {
-      setState(() {
-        _isLoading = true;
-        _hasError = false;
-        _errorMessage = null;
-      });
-    }
-
-    try {
-      final data = await _supabase
-          .from('marketplace_products')
-          .select('''
-          *,
-          marketplace_product_images(*),
-          profiles!inner(*)
-        ''')
-          .order('created_at', ascending: false);
-
-      if (mounted) {
-        setState(() {
-          _products = data;
-          _isLoading = false;
-          _hasError = false;
-        });
-      }
-    } on TimeoutException catch (e) {
-      debugPrint("Timeout fetching products: $e");
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-          _hasError = true;
-          _errorMessage = "Request timed out. Please check your connection.";
-        });
-      }
-      if (!_isInitialLoad && mounted) {
-        _showSnackBar(
-          "Request timed out. Please check your connection.",
-          isError: true,
-        );
-      }
-    } on PostgrestException catch (e) {
-      debugPrint("Database error fetching products: $e");
-      debugPrint("Full error details: ${e.toJson()}");
-
-      // Try a simpler query if the complex one fails
-      try {
-        debugPrint("Trying simpler query without profile join...");
-        final simpleData = await _supabase
-            .from('marketplace_products')
-            .select('''
-            *,
-            marketplace_product_images(*)
-          ''')
-            .order('created_at', ascending: false);
-
-        if (mounted) {
-          setState(() {
-            _products = simpleData;
-            _isLoading = false;
-            _hasError = false;
-          });
-        }
-      } catch (simpleError) {
-        debugPrint("Simple query also failed: $simpleError");
-        if (mounted) {
-          setState(() {
-            _isLoading = false;
-            _hasError = false; // Show empty state instead of error
-            _products = [];
-          });
-        }
-        if (!_isInitialLoad && mounted) {
-          _showSnackBar(
-            "No products available yet. Be the first to list one!",
-            isError: false,
-          );
-        }
-      }
-    } catch (e) {
-      debugPrint("Unexpected error fetching products: $e");
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-          _hasError = false; // Show empty state
-          _products = [];
-        });
-      }
-      // Only show snackbar on subsequent loads
-      if (!_isInitialLoad && mounted) {
-        _showSnackBar(
-          "Marketplace is empty. Start selling today!",
-          isError: false,
-        );
-      }
-    }
+    await Future.wait([
+      _loadProducts(refresh: true),
+      _loadCategories(),
+      _loadStates(),
+    ]);
   }
 
-  Future<void> _fetchStates() async {
-    setState(() => _isLoadingStates = true);
-
-    try {
-      final response = await _supabase.from('states').select().order('name');
-
-      final List<StateModel> loadedStates =
-          (response as List).map((e) => StateModel.fromJson(e)).toList();
-
-      if (mounted) {
-        setState(() {
-          _states = loadedStates;
-          _isLoadingStates = false;
-        });
-      }
-    } catch (e) {
-      debugPrint("Error fetching states: $e");
-      if (mounted) {
-        setState(() => _isLoadingStates = false);
-      }
-    }
-  }
-
-  Future<void> _fetchLgas(int stateId) async {
-    setState(() => _isLoadingLgas = true);
-
-    try {
-      final response = await _supabase
-          .from('lgas')
-          .select()
-          .eq('state_id', stateId)
-          .order('name');
-
-      final List<LgaModel> loadedLgas =
-          (response as List).map((e) => LgaModel.fromJson(e)).toList();
-
-      if (mounted) {
-        setState(() {
-          _lgas = loadedLgas;
-          _isLoadingLgas = false;
-        });
-      }
-    } catch (e) {
-      debugPrint("Error fetching LGAs: $e");
-      if (mounted) {
-        setState(() => _isLoadingLgas = false);
-      }
-    }
-  }
-
-  void _showSnackBar(String message, {bool isError = false}) {
-    ScaffoldMessenger.of(
-      context,
-    ).removeCurrentSnackBar(); // Remove any existing snackbar
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor:
-            isError
-                ? Theme.of(context).colorScheme.error
-                : Theme.of(context).colorScheme.primary,
-        duration: const Duration(seconds: 3),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      ),
-    );
-  }
-
-  Future<void> _handleRefresh() async {
-    _isInitialLoad = false; // After first refresh, treat as non-initial
-    await _fetchProducts();
-  }
-
-  void _handleStateChange(StateModel? newValue) {
-    if (newValue?.id == _selectedState?.id) return; // No change
+  Future<void> _loadProducts({bool refresh = false}) async {
+    if (!refresh && (!_hasMore || _isLoading)) return;
 
     setState(() {
-      _selectedState = newValue;
-      _selectedLga = null;
-      _lgas = [];
+      if (refresh) {
+        _currentPage = 0;
+        _hasMore = true;
+        _products.clear();
+      }
+      _isLoading = true;
+      _hasError = false;
+      _errorMessage = null;
     });
 
-    if (newValue != null) {
-      _fetchLgas(newValue.id);
+    try {
+      final newProducts = await _marketplaceService.getProducts(
+        category: _selectedCategory,
+        stateId: _selectedStateId,
+        lgaId: _selectedLgaId,
+        searchQuery: _searchQuery.isNotEmpty ? _searchQuery : null,
+        sortBy: _getSortField(),
+        ascending: _isAscending(),
+        limit: _pageSize,
+        offset: _currentPage * _pageSize,
+      );
+
+      setState(() {
+        _isLoading = false;
+        if (refresh) {
+          _products = newProducts;
+        } else {
+          _products.addAll(newProducts);
+        }
+        _hasMore = newProducts.length == _pageSize;
+        _currentPage++;
+      });
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _isLoading = false;
+        _hasError = true;
+        _errorMessage = 'Failed to load products: ${e.toString()}';
+      });
+
+      debugPrint('Error loading products: $e');
     }
   }
 
-  Widget _buildLoadingState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          CircularProgressIndicator(
-            color: Theme.of(context).primaryColor,
-            strokeWidth: 2,
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Loading products...',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: Theme.of(context).hintColor,
-            ),
-          ),
-        ],
-      ),
-    );
+  Future<void> _loadCategories() async {
+    try {
+      final categories = await _marketplaceService.getCategories();
+      if (!mounted) return;
+
+      setState(() {
+        _categories = categories;
+      });
+    } catch (e) {
+      debugPrint('Error loading categories: $e');
+    }
   }
 
-  Widget _buildErrorState() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.error_outline,
-              size: 64,
-              color: Theme.of(context).colorScheme.error,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              _errorMessage ?? 'Failed to load products',
-              textAlign: TextAlign.center,
-              style: Theme.of(
-                context,
-              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w500),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Please check your connection and try again.',
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: Theme.of(context).hintColor,
-              ),
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: () {
-                setState(() {
-                  _hasError = false;
-                  _errorMessage = null;
-                });
-                _fetchProducts();
-              },
-              icon: const Icon(Icons.refresh),
-              label: const Text('Try Again'),
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 24,
-                  vertical: 12,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+  Future<void> _loadStates() async {
+    if (_loadingStates) return;
+
+    setState(() => _loadingStates = true);
+
+    try {
+      final states = await _stateService.getStates();
+      if (!mounted) return;
+
+      setState(() {
+        _states = states;
+        _loadingStates = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() => _loadingStates = false);
+      debugPrint('Error loading states: $e');
+    }
   }
 
-  Widget _buildEmptyState() {
-    return Center(
-      child: SingleChildScrollView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).primaryColor.withOpacity(0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  Icons.shopping_bag_outlined,
-                  size: 60,
-                  color: Theme.of(context).primaryColor.withOpacity(0.5),
-                ),
-              ),
-              const SizedBox(height: 24),
-              Text(
-                "No products found",
-                style: Theme.of(
-                  context,
-                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                "Be the first to list a product in the marketplace!",
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Theme.of(context).hintColor,
-                ),
-              ),
-              const SizedBox(height: 24),
-              ElevatedButton.icon(
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const MarketplaceUploadPage(),
-                    ),
-                  );
-                },
-                icon: const Icon(Icons.add),
-                label: const Text('List Your Product'),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+  Future<void> _loadLgasForState(int stateId) async {
+    if (_loadingLgas || _lgasByState.containsKey(stateId)) return;
+
+    setState(() => _loadingLgas = true);
+
+    try {
+      final lgas = await _stateService.getLgasByState(stateId);
+      if (!mounted) return;
+
+      setState(() {
+        _lgasByState[stateId] = lgas;
+        _loadingLgas = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() => _loadingLgas = false);
+      debugPrint('Error loading LGAs: $e');
+    }
   }
 
-  Widget _buildProductsGrid() {
-    return GridView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        childAspectRatio: 0.62,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-      ),
-      itemCount: _products.length,
-      itemBuilder: (context, index) {
-        final product = _products[index];
-        return MarketProductCard(
-          product: product,
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => ProductViewPage(product: product),
-              ),
-            );
-          },
-        );
-      },
-    );
+  String _getSortField() {
+    switch (_selectedSort) {
+      case 'price_low':
+      case 'price_high':
+        return 'price';
+      case 'popular':
+        return 'views_count';
+      case 'likes':
+        return 'likes_count';
+      default:
+        return 'created_at';
+    }
+  }
+
+  bool _isAscending() {
+    switch (_selectedSort) {
+      case 'price_low':
+        return true;
+      case 'price_high':
+        return false;
+      case 'popular':
+      case 'likes':
+        return false;
+      default:
+        return false;
+    }
+  }
+
+  void _applyFilters() {
+    _currentPage = 0;
+    _hasMore = true;
+    _loadProducts(refresh: true);
+  }
+
+  void _clearFilters() {
+    setState(() {
+      _selectedCategory = null;
+      _selectedStateId = null;
+      _selectedLgaId = null;
+      _searchQuery = '';
+      _selectedSort = 'newest';
+    });
+    _applyFilters();
   }
 
   Widget _buildFilterDrawer() {
@@ -441,133 +233,156 @@ class _MarketViewPageState extends State<MarketView> {
                     ),
                   ),
                   const Spacer(),
-                  if (_selectedState != null || _selectedLga != null)
+                  if (_hasActiveFilters)
                     TextButton(
-                      onPressed: () {
-                        setState(() {
-                          _selectedState = null;
-                          _selectedLga = null;
-                          _lgas = [];
-                        });
-                      },
+                      onPressed: _clearFilters,
                       child: const Text('Clear All'),
                     ),
                 ],
               ),
             ),
 
-            // Categories
+            // Search
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
-              child: Text(
-                "Categories",
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
-                  color: theme.primaryColor,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+              child: TextField(
+                decoration: InputDecoration(
+                  hintText: 'Search products...',
+                  prefixIcon: const Icon(Icons.search),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  suffixIcon:
+                      _searchQuery.isNotEmpty
+                          ? IconButton(
+                            icon: const Icon(Icons.clear),
+                            onPressed: () {
+                              setState(() => _searchQuery = '');
+                              _applyFilters();
+                            },
+                          )
+                          : null,
                 ),
+                onChanged: (value) {
+                  setState(() => _searchQuery = value);
+                },
+                onSubmitted: (_) => _applyFilters(),
               ),
             ),
 
             Expanded(
-              child: ListView.separated(
+              child: ListView(
                 padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
-                itemCount: _categories.length,
-                separatorBuilder:
-                    (ctx, i) => Divider(height: 1, color: theme.dividerColor),
-                itemBuilder:
-                    (context, index) => ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(
-                        _categories[index],
-                        style: theme.textTheme.bodyMedium,
-                      ),
-                      trailing: Icon(
-                        Icons.chevron_right,
-                        size: 20,
-                        color: theme.iconTheme.color?.withOpacity(0.5),
-                      ),
-                      onTap: () {
-                        Navigator.pop(context);
-                        _showSnackBar("Filtering by: ${_categories[index]}");
-                      },
-                      dense: true,
-                    ),
-              ),
-            ),
-
-            Divider(color: theme.dividerColor),
-
-            // Filters Section
-            Padding(
-              padding: const EdgeInsets.all(20.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Location Filter
-                  Text(
-                    "Location",
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
+                  // Sort
+                  _buildFilterSection(
+                    title: 'Sort By',
+                    children: [
+                      _buildFilterChip('Newest', 'newest', 'sort'),
+                      _buildFilterChip(
+                        'Price: Low to High',
+                        'price_low',
+                        'sort',
+                      ),
+                      _buildFilterChip(
+                        'Price: High to Low',
+                        'price_high',
+                        'sort',
+                      ),
+                      _buildFilterChip('Most Popular', 'popular', 'sort'),
+                      _buildFilterChip('Most Liked', 'likes', 'sort'),
+                    ],
                   ),
-                  const SizedBox(height: 12),
-
-                  // State Dropdown
-                  Text("State", style: TextStyle(color: theme.hintColor)),
-                  const SizedBox(height: 4),
-                  _buildStateDropdown(theme),
-
-                  // LGA Dropdown (Conditional)
-                  if (_selectedState != null) ...[
-                    const SizedBox(height: 12),
-                    Text("LGA", style: TextStyle(color: theme.hintColor)),
-                    const SizedBox(height: 4),
-                    _buildLgaDropdown(theme),
-                  ],
 
                   const SizedBox(height: 20),
 
-                  // Sort By
-                  Text(
-                    "Sort By",
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
+                  // Categories
+                  if (_categories.isNotEmpty)
+                    _buildFilterSection(
+                      title: 'Categories',
+                      children: [
+                        _buildFilterChip('All Categories', null, 'category'),
+                        ..._categories
+                            .take(10)
+                            .map(
+                              (category) => _buildFilterChip(
+                                category,
+                                category,
+                                'category',
+                              ),
+                            )
+                            .toList(),
+                      ],
                     ),
+
+                  const SizedBox(height: 20),
+
+                  // States
+                  _buildFilterSection(
+                    title: 'State',
+                    children: [
+                      if (_loadingStates)
+                        const Padding(
+                          padding: EdgeInsets.all(8.0),
+                          child: Center(child: CircularProgressIndicator()),
+                        )
+                      else ...[
+                        _buildFilterChip('All States', null, 'state'),
+                        ..._states
+                            .take(10)
+                            .map(
+                              (state) => _buildFilterChip(
+                                state.name,
+                                state.id,
+                                'state',
+                              ),
+                            )
+                            .toList(),
+                      ],
+                    ],
                   ),
-                  const SizedBox(height: 8),
-                  _buildSortDropdown(theme),
+
+                  // LGAs (only show if a state is selected)
+                  if (_selectedStateId != null) ...[
+                    const SizedBox(height: 20),
+                    _buildFilterSection(
+                      title: 'LGA',
+                      children: [
+                        _buildFilterChip('All LGAs', null, 'lga'),
+                        if (_loadingLgas)
+                          const Padding(
+                            padding: EdgeInsets.all(8.0),
+                            child: Center(child: CircularProgressIndicator()),
+                          )
+                        else if (_lgasByState[_selectedStateId] != null)
+                          ..._lgasByState[_selectedStateId]!
+                              .take(10)
+                              .map(
+                                (lga) =>
+                                    _buildFilterChip(lga.name, lga.id, 'lga'),
+                              )
+                              .toList(),
+                      ],
+                    ),
+                  ],
                 ],
               ),
             ),
 
-            // Post Button
+            // Apply Button
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
               child: SizedBox(
                 width: double.infinity,
                 height: 50,
-                child: ElevatedButton.icon(
+                child: ElevatedButton(
                   onPressed: () {
                     Navigator.pop(context);
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => const MarketplaceUploadPage(),
-                      ),
-                    );
+                    _applyFilters();
                   },
-                  icon: const Icon(Icons.add_circle_outline, size: 20),
-                  label: const Text(
-                    "POST YOUR PRODUCTS/SERVICES",
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: theme.primaryColor,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    elevation: 0,
+                  child: const Text(
+                    "APPLY FILTERS",
+                    style: TextStyle(fontWeight: FontWeight.bold),
                   ),
                 ),
               ),
@@ -578,205 +393,186 @@ class _MarketViewPageState extends State<MarketView> {
     );
   }
 
-  Widget _buildStateDropdown(ThemeData theme) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(
-        border: Border.all(color: theme.dividerColor),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child:
-          _isLoadingStates
-              ? const SizedBox(
-                height: 48,
-                child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-              )
-              : DropdownButtonHideUnderline(
-                child: DropdownButton<StateModel>(
-                  isExpanded: true,
-                  dropdownColor: theme.cardColor,
-                  value: _selectedState,
-                  hint: Text(
-                    "All Nigeria",
-                    style: TextStyle(color: theme.hintColor),
-                  ),
-                  items: [
-                    DropdownMenuItem<StateModel>(
-                      value: null,
-                      child: Text(
-                        "All Nigeria",
-                        style: theme.textTheme.bodyMedium,
-                      ),
-                    ),
-                    ..._states
-                        .map(
-                          (state) => DropdownMenuItem<StateModel>(
-                            value: state,
-                            child: Text(
-                              state.name,
-                              style: theme.textTheme.bodyMedium,
-                            ),
-                          ),
-                        )
-                        .toList(),
-                  ],
-                  onChanged: _handleStateChange,
-                ),
-              ),
-    );
-  }
-
-  Widget _buildLgaDropdown(ThemeData theme) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(
-        border: Border.all(color: theme.dividerColor),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child:
-          _isLoadingLgas
-              ? const SizedBox(
-                height: 48,
-                child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-              )
-              : DropdownButtonHideUnderline(
-                child: DropdownButton<LgaModel>(
-                  isExpanded: true,
-                  dropdownColor: theme.cardColor,
-                  value: _selectedLga,
-                  hint: Text(
-                    "All LGAs",
-                    style: TextStyle(color: theme.hintColor),
-                  ),
-                  items: [
-                    DropdownMenuItem<LgaModel>(
-                      value: null,
-                      child: Text(
-                        "All LGAs",
-                        style: theme.textTheme.bodyMedium,
-                      ),
-                    ),
-                    ..._lgas
-                        .map(
-                          (lga) => DropdownMenuItem<LgaModel>(
-                            value: lga,
-                            child: Text(
-                              lga.name,
-                              style: theme.textTheme.bodyMedium,
-                            ),
-                          ),
-                        )
-                        .toList(),
-                  ],
-                  onChanged: (newValue) {
-                    setState(() => _selectedLga = newValue);
-                  },
-                ),
-              ),
-    );
-  }
-
-  Widget _buildSortDropdown(ThemeData theme) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(
-        border: Border.all(color: theme.dividerColor),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          isExpanded: true,
-          dropdownColor: theme.cardColor,
-          value: _selectedSort,
-          items:
-              _sortOptions
-                  .map(
-                    (value) => DropdownMenuItem<String>(
-                      value: value,
-                      child: Text(value, style: theme.textTheme.bodyMedium),
-                    ),
-                  )
-                  .toList(),
-          onChanged: (newValue) {
-            setState(() => _selectedSort = newValue!);
-          },
+  Widget _buildFilterSection({
+    required String title,
+    required List<Widget> children,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w600,
+            color: Theme.of(context).primaryColor,
+          ),
         ),
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, runSpacing: 8, children: children),
+      ],
+    );
+  }
+
+  Widget _buildFilterChip(String label, dynamic value, String type) {
+    bool isSelected = false;
+
+    switch (type) {
+      case 'sort':
+        isSelected = _selectedSort == value;
+        break;
+      case 'category':
+        isSelected = _selectedCategory == value;
+        break;
+      case 'state':
+        isSelected = _selectedStateId == value;
+        break;
+      case 'lga':
+        isSelected = _selectedLgaId == value;
+        break;
+    }
+
+    return FilterChip(
+      label: Text(label),
+      selected: isSelected,
+      onSelected: (selected) {
+        _handleFilterSelection(label, value, type);
+      },
+    );
+  }
+
+  void _handleFilterSelection(String label, dynamic value, String type) async {
+    switch (type) {
+      case 'sort':
+        setState(() => _selectedSort = value ?? 'newest');
+        break;
+      case 'category':
+        setState(() => _selectedCategory = value);
+        break;
+      case 'state':
+        setState(() {
+          _selectedStateId = value;
+          _selectedLgaId = null; // Reset LGA when state changes
+        });
+
+        // Load LGAs for selected state
+        if (value != null) {
+          await _loadLgasForState(value);
+        }
+        break;
+      case 'lga':
+        setState(() => _selectedLgaId = value);
+        break;
+    }
+  }
+
+  bool get _hasActiveFilters {
+    return _selectedCategory != null ||
+        _selectedStateId != null ||
+        _selectedLgaId != null ||
+        _searchQuery.isNotEmpty ||
+        _selectedSort != 'newest';
+  }
+
+  Widget _buildProductsGrid() {
+    return GridView.builder(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        childAspectRatio: 0.62,
+        crossAxisSpacing: 12,
+        mainAxisSpacing: 12,
       ),
+      itemCount: _products.length + (_hasMore ? 1 : 0),
+      itemBuilder: (context, index) {
+        if (index >= _products.length) {
+          // Load more indicator
+          if (_hasMore && !_isLoading) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              _loadProducts();
+            });
+          }
+          return _buildLoadingMore();
+        }
+
+        final product = _products[index];
+        return MarketProductCard(
+          product: product,
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => ProductViewPage(productId: product.id),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildLoadingMore() {
+    return Container(
+      margin: const EdgeInsets.all(16),
+      child: const Center(child: CircularProgressIndicator()),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     return Scaffold(
       key: _scaffoldKey,
-      backgroundColor: theme.scaffoldBackgroundColor,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         leading: IconButton(
-          icon: Icon(Icons.menu, color: theme.iconTheme.color),
+          icon: const Icon(Icons.menu),
           onPressed: () => _scaffoldKey.currentState?.openDrawer(),
         ),
-        title: Text(
+        title: const Text(
           "Marketplace",
-          style:
-              theme.appBarTheme.titleTextStyle ??
-              const TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
         ),
         centerTitle: true,
-        backgroundColor: theme.scaffoldBackgroundColor,
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.add),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const MarketplaceUploadPage(),
+                ),
+              );
+            },
+          ),
+        ],
       ),
       drawer: _buildFilterDrawer(),
       body:
-          _isLoading
-              ? _buildLoadingState()
+          _isLoading && _products.isEmpty
+              ? const Center(child: LoadingIndicator())
               : _hasError && _products.isEmpty
-              ? _buildErrorState()
+              ? NetworkErrorState(
+                onRetry: () => _loadProducts(refresh: true),
+                customMessage: _errorMessage ?? 'Failed to load products',
+              )
               : _products.isEmpty
-              ? _buildEmptyState()
+              ? NoProductsEmptyState(
+                onAddProduct: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const MarketplaceUploadPage(),
+                    ),
+                  );
+                },
+                isMarketplace: true,
+              )
               : RefreshIndicator(
-                color: theme.primaryColor,
-                backgroundColor: theme.cardColor,
-                onRefresh: _handleRefresh,
+                onRefresh: () => _loadProducts(refresh: true),
                 child: _buildProductsGrid(),
               ),
     );
   }
-}
-
-class StateModel {
-  final int id;
-  final String name;
-
-  StateModel({required this.id, required this.name});
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is StateModel && runtimeType == other.runtimeType && id == other.id;
-
-  @override
-  int get hashCode => id.hashCode;
-
-  factory StateModel.fromJson(Map<String, dynamic> json) =>
-      StateModel(id: json['id'], name: json['name']);
-}
-
-class LgaModel {
-  final int id;
-  final String name;
-
-  LgaModel({required this.id, required this.name});
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is LgaModel && runtimeType == other.runtimeType && id == other.id;
-
-  @override
-  int get hashCode => id.hashCode;
-
-  factory LgaModel.fromJson(Map<String, dynamic> json) =>
-      LgaModel(id: json['id'], name: json['name']);
 }

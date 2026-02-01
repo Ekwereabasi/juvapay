@@ -140,11 +140,15 @@ class _UpdateLocationScreenState extends State<UpdateLocationScreen> {
         ),
         title: Text(
           "Update Your Location",
-          style: theme.appBarTheme.titleTextStyle?.copyWith(
-            fontWeight: FontWeight.bold,
-          ),
+          style: Theme.of(
+            context,
+          ).appBarTheme.titleTextStyle?.copyWith(fontWeight: FontWeight.bold),
         ),
         centerTitle: true,
+        backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
+        elevation: Theme.of(context).appBarTheme.elevation ?? 0,
+        iconTheme: Theme.of(context).appBarTheme.iconTheme,
+        actionsIconTheme: Theme.of(context).appBarTheme.actionsIconTheme,
       ),
       body:
           _isLoading

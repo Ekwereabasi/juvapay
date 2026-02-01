@@ -1,8 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
-<key>NSAppTransportSecurity</key>
-
 <dict>
     <key>CFBundleDevelopmentRegion</key>
     <string>$(DEVELOPMENT_LANGUAGE)</string>
@@ -26,10 +24,12 @@
     <string>$(FLUTTER_BUILD_NUMBER)</string>
     <key>LSRequiresIPhoneOS</key>
     <true/>
+
     <key>UILaunchStoryboardName</key>
     <string>LaunchScreen</string>
     <key>UIMainStoryboardFile</key>
     <string>Main</string>
+
     <key>UISupportedInterfaceOrientations</key>
     <array>
         <string>UIInterfaceOrientationPortrait</string>
@@ -43,52 +43,59 @@
         <string>UIInterfaceOrientationLandscapeLeft</string>
         <string>UIInterfaceOrientationLandscapeRight</string>
     </array>
+
     <key>CADisableMinimumFrameDurationOnPhone</key>
     <true/>
     <key>UIApplicationSupportsIndirectInputEvents</key>
     <true/>
-    
-    <!-- Photo Library Permissions (for saving images with gal package) -->
+    <key>FlutterDeepLinkingEnabled</key>
+    <true/>
+
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>CFBundleURLName</key>
+            <string>com.juvapay.app</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>juvapay</string>
+            </array>
+        </dict>
+    </array>
+
     <key>NSPhotoLibraryAddUsageDescription</key>
     <string>We need access to save images to your photo gallery</string>
     <key>NSPhotoLibraryUsageDescription</key>
     <string>We need access to save images to your photo gallery</string>
-    
-    <!-- Optional: Camera permission (if your app will take photos) -->
     <key>NSCameraUsageDescription</key>
     <string>We need camera access to take photos for tasks</string>
-    
-    <!-- Optional: Microphone permission (if recording videos) -->
     <key>NSMicrophoneUsageDescription</key>
     <string>We need microphone access for video recording</string>
-    
-    <!-- Optional: Location permission (if showing user location) -->
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>We need location to show nearby tasks</string>
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
     <string>We need location to show nearby tasks</string>
-    
-    <!-- Background modes for notifications (if using push notifications) -->
+
     <key>UIBackgroundModes</key>
     <array>
         <string>fetch</string>
         <string>remote-notification</string>
     </array>
-    
-    <!-- For opening URLs (like app settings with url_launcher) -->
+
     <key>LSApplicationQueriesSchemes</key>
     <array>
         <string>app-settings</string>
+        <string>https</string>
+        <string>http</string>
     </array>
 
-	<!-- Add this for opening app settings -->
-	<key>LSApplicationQueriesSchemes</key>
-	<array>
-		<string>app-settings</string>
-	</array>
-      <key>NSAllowsArbitraryLoads</key>
-    <true/>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
+    </dict>
 
-    
 </dict>
 </plist>

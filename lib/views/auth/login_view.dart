@@ -3,6 +3,8 @@ import 'package:provider/provider.dart';
 import '../../../view_models/login_view_model.dart';
 import '../../widgets/app_bottom_navbar.dart';
 import 'signup_view_single_page.dart';
+import 'forgot_password_page.dart';
+
 
 // ----------------------------------------------------------------------
 // 1. The Provider Wrapper
@@ -234,17 +236,23 @@ class _LoginScreenContentState extends State<LoginScreenContent> {
                 const SizedBox(height: 12),
 
                 // --- Forgot Password ---
+                // In your login page, add this button
                 TextButton(
-                  onPressed: () {},
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const ForgotPasswordPage(),
+                      ),
+                    );
+                  },
                   child: Text(
                     'Forgot Password?',
-                    style: TextStyle(
+                    style: theme.textTheme.bodyMedium?.copyWith(
                       color: theme.primaryColor,
-                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
-
                 Divider(color: theme.dividerColor),
 
                 const SizedBox(height: 12),

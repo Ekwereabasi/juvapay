@@ -6,19 +6,49 @@ import 'package:flutter/material.dart';
 const Color _primaryColor = Color(0xFF673AB7);
 const MaterialColor _primarySwatch = Colors.deepPurple;
 
+// Light Theme Colors
+const Color _lightHintColor = Color(0xFF757575);
+const Color _lightDisabledColor = Color(0xFFC2C2C2);
+const Color _lightSurface = Colors.white;
+const Color _lightBackground = Colors.white;
+const Color _lightOnSurface = Colors.black87;
+
+// Dark Theme Colors
+const Color _darkHintColor = Color(0xFFAAAAAA);
+const Color _darkDisabledColor = Color(0xFF555555);
+const Color _darkSurface = Color(0xFF1E1E1E);
+const Color _darkBackground = Color(0xFF121212);
+const Color _darkOnSurface = Colors.white70;
+
 // --- Light Theme Definition ---
 ThemeData lightTheme() {
   return ThemeData(
     brightness: Brightness.light,
     primarySwatch: _primarySwatch,
     primaryColor: _primaryColor,
-    scaffoldBackgroundColor: Colors.white,
-    cardColor: Colors.white, // Background for cards and containers
+    scaffoldBackgroundColor: _lightBackground,
+    cardColor: _lightSurface,
     dividerColor: Colors.grey.shade200,
+    hintColor: _lightHintColor,
+    disabledColor: _lightDisabledColor,
+    // ColorScheme for Flutter's Material Design 3 support
+    colorScheme: ColorScheme.light(
+      primary: _primaryColor,
+      onPrimary: Colors.white,
+      surface: _lightSurface,
+      onSurface: _lightOnSurface,
+      background: _lightBackground,
+      onBackground: _lightOnSurface,
+      secondary: Colors.purple.shade300,
+      onSecondary: Colors.white,
+      error: Colors.red,
+      onError: Colors.white,
+      outline: Colors.grey.shade400,
+    ),
 
-    // AppBar
+    // AppBar - FIXED: Removed redundant const keywords
     appBarTheme: const AppBarTheme(
-      color: Colors.white,
+      backgroundColor: _lightSurface,
       elevation: 0,
       iconTheme: IconThemeData(color: Colors.black),
       actionsIconTheme: IconThemeData(color: Colors.black),
@@ -31,7 +61,7 @@ ThemeData lightTheme() {
 
     // Bottom Navigation Bar
     bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-      backgroundColor: Colors.white,
+      backgroundColor: _lightSurface,
       selectedItemColor: _primaryColor,
       unselectedItemColor: Colors.grey,
     ),
@@ -77,16 +107,30 @@ ThemeData darkTheme() {
     brightness: Brightness.dark,
     primarySwatch: _primarySwatch,
     primaryColor: _primaryColor,
-    scaffoldBackgroundColor: const Color(0xFF121212), // Darkest background
-    cardColor: const Color(
-      0xFF1E1E1E,
-    ), // Slightly lighter background for cards/containers
-    canvasColor: const Color(0xFF1E1E1E), // Background for Drawers/Menus
+    scaffoldBackgroundColor: _darkBackground,
+    cardColor: _darkSurface,
+    canvasColor: _darkSurface,
     dividerColor: Colors.white12,
+    hintColor: _darkHintColor,
+    disabledColor: _darkDisabledColor,
+    // ColorScheme for Flutter's Material Design 3 support
+    colorScheme: ColorScheme.dark(
+      primary: _primaryColor,
+      onPrimary: Colors.white,
+      surface: _darkSurface,
+      onSurface: _darkOnSurface,
+      background: _darkBackground,
+      onBackground: _darkOnSurface,
+      secondary: Colors.purple.shade300,
+      onSecondary: Colors.white,
+      error: Colors.red.shade400,
+      onError: Colors.white,
+      outline: Colors.white24,
+    ),
 
-    // AppBar
+    // AppBar - FIXED: Removed redundant const keywords
     appBarTheme: const AppBarTheme(
-      backgroundColor: Color(0xFF121212), // Match scaffold for seamless look
+      backgroundColor: _darkBackground,
       elevation: 0,
       iconTheme: IconThemeData(color: Colors.white),
       actionsIconTheme: IconThemeData(color: Colors.white),
@@ -97,9 +141,9 @@ ThemeData darkTheme() {
       ),
     ),
 
-    // Bottom Navigation Bar - THIS FIXES THE TAB BAR DARK MODE
+    // Bottom Navigation Bar
     bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-      backgroundColor: Color(0xFF1E1E1E),
+      backgroundColor: _darkSurface,
       selectedItemColor: _primaryColor,
       unselectedItemColor: Colors.white54,
     ),
@@ -127,7 +171,7 @@ ThemeData darkTheme() {
     // Outlined Button
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
-        foregroundColor: Colors.white, // Better contrast in dark mode
+        foregroundColor: Colors.white,
         padding: const EdgeInsets.symmetric(vertical: 16),
         side: const BorderSide(color: _primaryColor, width: 1.5),
         shape: RoundedRectangleBorder(

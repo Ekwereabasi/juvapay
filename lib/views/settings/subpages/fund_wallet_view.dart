@@ -125,7 +125,7 @@ class _FundWalletScreenState extends State<FundWalletScreen> {
         customization: Customization(
           title: 'Fund Wallet',
           description: 'Wallet top-up',
-          logo: 'https://your-logo-url.com/logo.png',
+          logo: 'https://hdaxtvyvrnqhoghzfixx.supabase.co/storage/v1/object/public/assest/logo.png',
         ),
       );
 

@@ -3,7 +3,6 @@ import 'package:juvapay/widgets/app_bottom_navbar.dart';
 import 'package:provider/provider.dart';
 import '../../view_models/registration_view_model.dart';
 import '../../models/location_models.dart';
-// import '../home/home_view.dart'; // Not needed if using AppBottomNavbar
 
 class SignupViewSinglePage extends StatefulWidget {
   const SignupViewSinglePage({super.key});
@@ -14,6 +13,7 @@ class SignupViewSinglePage extends StatefulWidget {
 
 class _SignupViewSinglePageState extends State<SignupViewSinglePage> {
   final _formKey = GlobalKey<FormState>();
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
 
   // Controllers for text input
   final _emailController = TextEditingController();
@@ -29,16 +29,31 @@ class _SignupViewSinglePageState extends State<SignupViewSinglePage> {
   bool _isPasswordVisible = false;
   bool _isConfirmPasswordVisible = false;
 
+  // Track if form has been submitted (to prevent multiple submissions)
+  bool _isSubmitting = false;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      // Initialize data fetching for states/LGAs
-      Provider.of<RegistrationViewModel>(
+      _initializeData();
+    });
+  }
+
+  Future<void> _initializeData() async {
+    try {
+      await Provider.of<RegistrationViewModel>(
         context,
         listen: false,
       ).initializeData();
-    });
+    } catch (e) {
+      if (mounted) {
+        _showSnackBar(
+          'Error loading location data. Please check your connection.',
+          Colors.orange,
+        );
+      }
+    }
   }
 
   @override
@@ -51,11 +66,10 @@ class _SignupViewSinglePageState extends State<SignupViewSinglePage> {
     super.dispose();
   }
 
-  // ✅ FIXED: Dynamic Border Colors for Light/Dark Mode
+  // Dynamic Border Colors for Light/Dark Mode
   InputDecoration _inputDecoration(String labelText, {Widget? suffixIcon}) {
     return InputDecoration(
       labelText: labelText,
-      // Use standard label style from theme
       labelStyle: TextStyle(color: Theme.of(context).hintColor),
       border: OutlineInputBorder(
         borderRadius: const BorderRadius.all(Radius.circular(8.0)),
@@ -63,71 +77,150 @@ class _SignupViewSinglePageState extends State<SignupViewSinglePage> {
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: const BorderRadius.all(Radius.circular(8.0)),
-        // ✅ Uses dynamic divider color (Grey in light, White12 in dark)
         borderSide: BorderSide(color: Theme.of(context).dividerColor),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: const BorderRadius.all(Radius.circular(8.0)),
-        // ✅ Uses your Primary Purple
         borderSide: BorderSide(
           color: Theme.of(context).primaryColor,
           width: 2.0,
         ),
+      ),
+      errorBorder: OutlineInputBorder(
+        borderRadius: const BorderRadius.all(Radius.circular(8.0)),
+        borderSide: BorderSide(color: Theme.of(context).colorScheme.error),
       ),
       suffixIcon: suffixIcon,
       contentPadding: const EdgeInsets.symmetric(
         vertical: 16.0,
         horizontal: 16.0,
       ),
+      filled: true,
+      fillColor: Theme.of(context).cardColor,
     );
   }
 
-  // --- Unified Submission Logic ---
-  void _submitForm(RegistrationViewModel viewModel) async {
-    // 1. Validate Form & Location Data
-    if (!_formKey.currentState!.validate() ||
-        _selectedState == null ||
-        _selectedLga == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text(
-            'Please complete all required fields and select your location.',
+  void _showSnackBar(String message, Color backgroundColor) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: backgroundColor,
+        duration: const Duration(seconds: 4),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8.0)),
+      ),
+    );
+  }
+
+  void _showErrorDialog(String title, String message) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder:
+          (context) => AlertDialog(
+            title: Text(title),
+            content: Text(message),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
+            ],
           ),
-          backgroundColor:
-              Colors.orange.shade800, // Slightly darker for better contrast
-        ),
+    );
+  }
+
+  // --- SUBMISSION LOGIC WITH COMPREHENSIVE VALIDATION ---
+  Future<void> _submitForm(RegistrationViewModel viewModel) async {
+    // Prevent multiple submissions
+    if (_isSubmitting) return;
+
+    _isSubmitting = true;
+
+    // Validate Form & Location Data
+    if (!_formKey.currentState!.validate()) {
+      _isSubmitting = false;
+      _showSnackBar('Please fix the errors in the form.', Colors.orange);
+      return;
+    }
+
+    if (_selectedState == null || _selectedLga == null) {
+      _isSubmitting = false;
+      _showSnackBar('Please select your State and LGA.', Colors.orange);
+      return;
+    }
+
+    // Validate password match
+    if (_passwordController.text != _confirmPasswordController.text) {
+      _isSubmitting = false;
+      _showSnackBar('Passwords do not match.', Colors.red);
+      return;
+    }
+
+    // Validate password strength
+    if (_passwordController.text.length < 6) {
+      _isSubmitting = false;
+      _showSnackBar(
+        'Password must be at least 6 characters long.',
+        Colors.orange,
       );
       return;
     }
 
-    // 2. Load all data into the ViewModel for processing
+    // Load all data into the ViewModel for processing
     viewModel.setBasicDetails(
       email: _emailController.text,
       password: _passwordController.text,
       username: _usernameController.text,
       fullName: _fullNameController.text,
     );
-    // Location data (LGA) is already in the ViewModel via the onChanged handler below
 
-    // 3. Process Signup (Auth, Profile Update)
-    final success = await viewModel.processSignup(context);
+    // Process Signup
+    final result = await viewModel.processSignup(context);
 
-    if (context.mounted) {
-      if (success) {
-        // Success: Navigate to the Nav Bar Shell
+    _isSubmitting = false;
+
+    if (!mounted) return;
+
+    if (result['success'] == true) {
+      // Show success message
+      _showSnackBar(
+        result['message'] ?? 'Registration successful!',
+        Colors.green,
+      );
+
+      // Check for any warnings
+      if (result['warning'] != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _showSnackBar(result['warning'], Colors.amber.shade700);
+        });
+      }
+
+      // Navigate to main app after short delay
+      await Future.delayed(const Duration(milliseconds: 1500));
+
+      if (mounted) {
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (_) => const AppBottomNavigationBar()),
           (Route<dynamic> route) => false,
         );
-      } else {
-        // Failure: Show error message from ViewModel
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(viewModel.errorMessage ?? 'Registration failed.'),
-            backgroundColor:
-                Theme.of(context).colorScheme.error, // Use Theme error color
-          ),
+      }
+    } else {
+      // Handle different error types
+      final errorType = result['error_type'];
+      final errorMessage = result['message'] ?? 'Registration failed.';
+
+      if (errorType == 'network_error' || errorType == 'timeout_error') {
+        _showErrorDialog(
+          'Connection Error',
+          '$errorMessage\n\nPlease check your internet connection and try again.',
         );
+      } else if (errorType == 'auth_error') {
+        _showErrorDialog('Authentication Error', errorMessage);
+      } else if (errorType == 'validation_error') {
+        _showSnackBar(errorMessage, Colors.orange);
+      } else {
+        _showErrorDialog('Registration Failed', errorMessage);
       }
     }
   }
@@ -135,256 +228,428 @@ class _SignupViewSinglePageState extends State<SignupViewSinglePage> {
   @override
   Widget build(BuildContext context) {
     final viewModel = Provider.of<RegistrationViewModel>(context);
+    final theme = Theme.of(context);
+    final isDarkMode = theme.brightness == Brightness.dark;
 
     return Scaffold(
-      // ✅ FIXED: Removed hardcoded background color.
-      // It will now use 'scaffoldBackgroundColor' from AppTheme (White or #121212)
+      key: _scaffoldKey,
+      backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
         title: Text(
-          'Complete Registration',
-          style: Theme.of(context).appBarTheme.titleTextStyle,
+          'Create Account',
+          style: theme.textTheme.headlineSmall?.copyWith(
+            fontWeight: FontWeight.bold,
+          ),
         ),
-        // ✅ FIXED: Removed hardcoded white/elevation. Inherits from AppTheme.
+        centerTitle: true,
+        backgroundColor: theme.appBarTheme.backgroundColor,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.pop(context),
+        ),
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24.0),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // --- Text Fields ---
-              TextFormField(
-                controller: _fullNameController,
-                decoration: _inputDecoration('Full Name'),
-                // ✅ Text color is automatic via Theme.textTheme.bodyMedium
-                validator: (v) => v!.isEmpty ? 'Enter your full name' : null,
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _usernameController,
-                decoration: _inputDecoration('Username (Public)'),
-                validator:
-                    (v) => v!.isEmpty ? 'Choose a unique username' : null,
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _emailController,
-                keyboardType: TextInputType.emailAddress,
-                decoration: _inputDecoration('Email Address'),
-                validator:
-                    (v) =>
-                        v!.isEmpty || !v.contains('@')
-                            ? 'Enter a valid email'
-                            : null,
-              ),
-              const SizedBox(height: 16),
-
-              // --- Password Input (with Toggle) ---
-              TextFormField(
-                controller: _passwordController,
-                obscureText: !_isPasswordVisible,
-                decoration: _inputDecoration(
-                  'Password',
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                      _isPasswordVisible
-                          ? Icons.visibility
-                          : Icons.visibility_off,
-                      // ✅ FIXED: Use theme hint color for icons
-                      color: Theme.of(context).hintColor,
-                    ),
-                    onPressed: () {
-                      setState(() {
-                        _isPasswordVisible = !_isPasswordVisible;
-                      });
-                    },
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20.0),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Header
+                Text(
+                  'Join Juvapay',
+                  style: theme.textTheme.headlineMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: theme.primaryColor,
                   ),
+                  textAlign: TextAlign.center,
                 ),
-                validator:
-                    (v) =>
-                        v!.length < 6
-                            ? 'Password must be at least 6 characters'
-                            : null,
-              ),
-              const SizedBox(height: 16),
-
-              // --- Confirm Password Input (with Toggle) ---
-              TextFormField(
-                controller: _confirmPasswordController,
-                obscureText: !_isConfirmPasswordVisible,
-                decoration: _inputDecoration(
-                  'Confirm Password',
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                      _isConfirmPasswordVisible
-                          ? Icons.visibility
-                          : Icons.visibility_off,
-                      // ✅ FIXED: Use theme hint color for icons
-                      color: Theme.of(context).hintColor,
-                    ),
-                    onPressed: () {
-                      setState(() {
-                        _isConfirmPasswordVisible = !_isConfirmPasswordVisible;
-                      });
-                    },
+                const SizedBox(height: 8),
+                Text(
+                  'Create your account to get started',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.hintColor,
                   ),
+                  textAlign: TextAlign.center,
                 ),
-                validator: (v) {
-                  if (v!.isEmpty) return 'Confirm your password';
-                  if (v != _passwordController.text)
-                    return 'Passwords do not match';
-                  return null;
-                },
-              ),
+                const SizedBox(height: 30),
 
-              const SizedBox(height: 30),
-
-              // --- Location Title ---
-              Text(
-                'Location Details',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 18,
-                  // ✅ FIXED: Primary color works well on both, but this ensures consistency
-                  color: Theme.of(context).primaryColor,
+                // Full Name
+                TextFormField(
+                  controller: _fullNameController,
+                  decoration: _inputDecoration('Full Name'),
+                  style: theme.textTheme.bodyLarge,
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Please enter your full name';
+                    }
+                    if (value.trim().length < 2) {
+                      return 'Name must be at least 2 characters';
+                    }
+                    return null;
+                  },
+                  textInputAction: TextInputAction.next,
                 ),
-              ),
-              const SizedBox(height: 15),
+                const SizedBox(height: 16),
 
-              // --- Location Dropdowns ---
-              if (viewModel.states.isEmpty && viewModel.isLoading)
-                Center(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 20.0),
-                    child: CircularProgressIndicator(
-                      // ✅ FIXED: Ensure spinner uses primary color
-                      valueColor: AlwaysStoppedAnimation<Color>(
-                        Theme.of(context).primaryColor,
+                // Username
+                TextFormField(
+                  controller: _usernameController,
+                  decoration: _inputDecoration('Username'),
+                  style: theme.textTheme.bodyLarge,
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Please choose a username';
+                    }
+                    if (value.length < 3) {
+                      return 'Username must be at least 3 characters';
+                    }
+                    if (!RegExp(r'^[a-zA-Z0-9_]+$').hasMatch(value)) {
+                      return 'Only letters, numbers, and underscores allowed';
+                    }
+                    return null;
+                  },
+                  textInputAction: TextInputAction.next,
+                ),
+                const SizedBox(height: 16),
+
+                // Email
+                TextFormField(
+                  controller: _emailController,
+                  keyboardType: TextInputType.emailAddress,
+                  decoration: _inputDecoration('Email Address'),
+                  style: theme.textTheme.bodyLarge,
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Please enter your email address';
+                    }
+                    if (!RegExp(
+                      r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
+                    ).hasMatch(value)) {
+                      return 'Please enter a valid email address';
+                    }
+                    return null;
+                  },
+                  textInputAction: TextInputAction.next,
+                ),
+                const SizedBox(height: 16),
+
+                // Password
+                TextFormField(
+                  controller: _passwordController,
+                  obscureText: !_isPasswordVisible,
+                  decoration: _inputDecoration(
+                    'Password',
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _isPasswordVisible
+                            ? Icons.visibility_off
+                            : Icons.visibility,
+                        color: theme.hintColor,
                       ),
-                    ),
-                  ),
-                )
-              else
-                Column(
-                  children: [
-                    // State Dropdown
-                    DropdownButtonFormField<StateModel>(
-                      value: _selectedState,
-                      hint: Text(
-                        'Select State',
-                        // ✅ FIXED: Ensure hint text is visible in dark mode
-                        style: TextStyle(color: Theme.of(context).hintColor),
-                      ),
-                      decoration: _inputDecoration('State'),
-                      isExpanded: true,
-                      // ✅ FIXED: Ensure dropdown background adapts to theme card color
-                      dropdownColor: Theme.of(context).cardColor,
-                      items:
-                          viewModel.states
-                              .map(
-                                (state) => DropdownMenuItem(
-                                  value: state,
-                                  child: Text(
-                                    state.name,
-                                    // ✅ FIXED: Ensure item text adapts to theme body text
-                                    style:
-                                        Theme.of(context).textTheme.bodyLarge,
-                                  ),
-                                ),
-                              )
-                              .toList(),
-                      onChanged: (value) {
-                        if (value != null) {
-                          setState(() {
-                            _selectedState = value;
-                            _selectedLga = null;
-                          });
-                          viewModel.loadLgas(value);
-                        }
+                      onPressed: () {
+                        setState(() {
+                          _isPasswordVisible = !_isPasswordVisible;
+                        });
                       },
-                      validator:
-                          (v) => v == null ? 'Please select a state' : null,
                     ),
-
-                    const SizedBox(height: 20),
-
-                    // LGA Dropdown
-                    DropdownButtonFormField<LgaModel>(
-                      value: _selectedLga,
-                      hint: Text(
-                        _selectedState == null
-                            ? 'Select a State first'
-                            : 'Select LGA',
-                        style: TextStyle(color: Theme.of(context).hintColor),
-                      ),
-                      decoration: _inputDecoration('LGA'),
-                      isExpanded: true,
-                      dropdownColor: Theme.of(context).cardColor,
-                      items:
-                          viewModel.lgas
-                              .map(
-                                (lga) => DropdownMenuItem(
-                                  value: lga,
-                                  child: Text(
-                                    lga.name,
-                                    style:
-                                        Theme.of(context).textTheme.bodyLarge,
-                                  ),
-                                ),
-                              )
-                              .toList(),
-                      onChanged: (value) {
-                        if (value != null) {
-                          setState(() {
-                            _selectedLga = value;
-                          });
-                          viewModel.setLGA(value);
-                        }
-                      },
-                      validator:
-                          (v) => v == null ? 'Please select an LGA' : null,
-                    ),
-                  ],
-                ),
-
-              const SizedBox(height: 40),
-
-              // --- Submit Button ---
-              if (viewModel.isLoading && viewModel.states.isNotEmpty)
-                const Center(child: CircularProgressIndicator())
-              else
-                ElevatedButton(
-                  onPressed: () => _submitForm(viewModel),
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    textStyle: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                    // Theme handles background color, but explicit primary is fine too
-                    backgroundColor: Theme.of(context).primaryColor,
-                    foregroundColor: Colors.white,
                   ),
-                  child: const Text('REGISTER & SIGN IN'),
+                  style: theme.textTheme.bodyLarge,
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Please enter a password';
+                    }
+                    if (value.length < 6) {
+                      return 'Password must be at least 6 characters';
+                    }
+                    return null;
+                  },
+                  textInputAction: TextInputAction.next,
                 ),
-
-              if (viewModel.errorMessage != null)
+                const SizedBox(height: 8),
                 Padding(
-                  padding: const EdgeInsets.only(top: 16.0),
+                  padding: const EdgeInsets.only(left: 4.0),
                   child: Text(
-                    'Error: ${viewModel.errorMessage!}',
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
-                      fontWeight: FontWeight.bold,
+                    'Use at least 6 characters',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.hintColor,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // Confirm Password
+                TextFormField(
+                  controller: _confirmPasswordController,
+                  obscureText: !_isConfirmPasswordVisible,
+                  decoration: _inputDecoration(
+                    'Confirm Password',
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _isConfirmPasswordVisible
+                            ? Icons.visibility_off
+                            : Icons.visibility,
+                        color: theme.hintColor,
+                      ),
+                      onPressed: () {
+                        setState(() {
+                          _isConfirmPasswordVisible =
+                              !_isConfirmPasswordVisible;
+                        });
+                      },
+                    ),
+                  ),
+                  style: theme.textTheme.bodyLarge,
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Please confirm your password';
+                    }
+                    if (value != _passwordController.text) {
+                      return 'Passwords do not match';
+                    }
+                    return null;
+                  },
+                  textInputAction: TextInputAction.done,
+                ),
+                const SizedBox(height: 30),
+
+                // Location Section
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: theme.cardColor,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: theme.dividerColor),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.location_on,
+                            color: theme.primaryColor,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Location Details',
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+
+                      // State Dropdown
+                      DropdownButtonFormField<StateModel>(
+                        value: _selectedState,
+                        hint: Text(
+                          'Select State',
+                          style: TextStyle(color: theme.hintColor),
+                        ),
+                        decoration: _inputDecoration('State'),
+                        isExpanded: true,
+                        dropdownColor: theme.cardColor,
+                        items:
+                            viewModel.states.map((state) {
+                              return DropdownMenuItem(
+                                value: state,
+                                child: Text(
+                                  state.name,
+                                  style: theme.textTheme.bodyLarge,
+                                ),
+                              );
+                            }).toList(),
+                        onChanged: (value) {
+                          if (value != null) {
+                            setState(() {
+                              _selectedState = value;
+                              _selectedLga = null;
+                            });
+                            viewModel.loadLgas(value);
+                          }
+                        },
+                        validator: (value) {
+                          if (value == null) return 'Please select your state';
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 16),
+
+                      // LGA Dropdown
+                      DropdownButtonFormField<LgaModel>(
+                        value: _selectedLga,
+                        hint: Text(
+                          _selectedState == null
+                              ? 'Select State first'
+                              : 'Select LGA',
+                          style: TextStyle(color: theme.hintColor),
+                        ),
+                        decoration: _inputDecoration('LGA'),
+                        isExpanded: true,
+                        dropdownColor: theme.cardColor,
+                        items:
+                            viewModel.lgas.map((lga) {
+                              return DropdownMenuItem(
+                                value: lga,
+                                child: Text(
+                                  lga.name,
+                                  style: theme.textTheme.bodyLarge,
+                                ),
+                              );
+                            }).toList(),
+                        onChanged: (value) {
+                          if (value != null) {
+                            setState(() {
+                              _selectedLga = value;
+                            });
+                            viewModel.setLGA(value);
+                          }
+                        },
+                        validator: (value) {
+                          if (value == null) return 'Please select your LGA';
+                          return null;
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Error Message
+                if (viewModel.errorMessage != null &&
+                    viewModel.errorType != 'network_error')
+                  Container(
+                    margin: const EdgeInsets.only(top: 20),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.error.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: theme.colorScheme.error.withOpacity(0.3),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.error_outline,
+                          color: theme.colorScheme.error,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            viewModel.errorMessage!,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: theme.colorScheme.error,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                const SizedBox(height: 30),
+
+                // Submit Button
+                ElevatedButton(
+                  onPressed:
+                      _isSubmitting || viewModel.isLoading
+                          ? null
+                          : () => _submitForm(viewModel),
+                  style: ElevatedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 18),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    backgroundColor: theme.primaryColor,
+                    foregroundColor: Colors.white,
+                    elevation: 2,
+                    disabledBackgroundColor: theme.primaryColor.withOpacity(
+                      0.5,
+                    ),
+                  ),
+                  child:
+                      _isSubmitting || viewModel.isLoading
+                          ? SizedBox(
+                            height: 24,
+                            width: 24,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                Colors.white,
+                              ),
+                            ),
+                          )
+                          : Text(
+                            'CREATE ACCOUNT',
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                ),
+
+                const SizedBox(height: 20),
+
+                // Additional Information
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: theme.cardColor,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: theme.dividerColor),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.info_outline,
+                            color: theme.primaryColor,
+                            size: 18,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Important Information',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        '• You will be signed in immediately after registration\n'
+                        '• No email verification is required\n'
+                        '• Use a valid email address for account recovery\n'
+                        '• Keep your password secure and confidential',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.hintColor,
+                          height: 1.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 10),
+                // Terms and Privacy Notice
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                  child: Text(
+                    'By creating an account, you agree to our Terms of Service and Privacy Policy.',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.hintColor,
                     ),
                     textAlign: TextAlign.center,
                   ),
                 ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

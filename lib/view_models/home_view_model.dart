@@ -1,6 +1,8 @@
 // view_models/home_view_model.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/supabase_auth_service.dart';
 import '../services/wallet_service.dart';
 import '../services/task_service.dart';
@@ -9,8 +11,6 @@ import '../services/network_service.dart';
 import '../models/task_models.dart';
 import '../utils/platform_helper.dart';
 import '../utils/task_helper.dart';
-import 'package:supabase_flutter/supabase_flutter.dart'; // Add this import
-
 
 class HomeViewModel extends ChangeNotifier {
   final SupabaseAuthService _authService = SupabaseAuthService();
@@ -30,8 +30,11 @@ class HomeViewModel extends ChangeNotifier {
   Wallet? _wallet;
   List<TaskModel> _tasks = [];
   List<Transaction> _recentTransactions = [];
+  List<Map<String, dynamic>> _availableTasks = [];
   String _fullName = 'User';
   String? _profilePictureUrl;
+  Map<String, dynamic>? _userProfile;
+  bool _isMember = false;
 
   // Cache timestamps
   DateTime? _tasksLastUpdated;
@@ -48,8 +51,10 @@ class HomeViewModel extends ChangeNotifier {
   Wallet? get wallet => _wallet;
   List<TaskModel> get tasks => _tasks;
   List<Transaction> get recentTransactions => _recentTransactions;
+  List<Map<String, dynamic>> get availableTasks => _availableTasks;
   String get fullName => _fullName;
   String? get profilePictureUrl => _profilePictureUrl;
+  bool get isMember => _isMember;
 
   // Helper getter for backward compatibility
   Map<String, dynamic> get walletAsMap {
@@ -183,41 +188,21 @@ class HomeViewModel extends ChangeNotifier {
 
   Future<void> _fetchFromNetwork() async {
     try {
-      // 1. Fetch Profile
-      final user =
-          _authService.isAuthenticated() ? _authService.getCurrentUser() : null;
-      if (user != null) {
-        final userData = await _authService.getUserProfile();
-        if (userData != null) {
-          _fullName = userData['full_name'] ?? 'User';
-          _profilePictureUrl = userData['avatar_url'];
-          _profileLastUpdated = DateTime.now();
-        }
-      }
+      // 1. Fetch Profile and check membership
+      await _loadUserProfile();
 
       // 2. Fetch Wallet
-      try {
-        _wallet = await _walletService.getWallet();
-        _walletLastUpdated = DateTime.now();
-      } catch (e) {
-        debugPrint("Error fetching wallet: $e");
-        // Create a default wallet if none exists
-        _wallet = Wallet(
-          userId: user?.id ?? '',
-          currentBalance: 0.0,
-          availableBalance: 0.0,
-          lockedBalance: 0.0,
-          totalEarned: 0.0,
-          totalDeposited: 0.0,
-          totalWithdrawn: 0.0,
-          totalSpent: 0.0,
-          status: 'active',
-          createdAt: DateTime.now(),
-          updatedAt: DateTime.now(),
-        );
+      await _loadWalletData();
+
+      // 3. Fetch Recent Transactions
+      await _loadRecentTransactions();
+
+      // 4. Fetch available tasks only if user is a member
+      if (_isMember) {
+        await _loadAvailableTasks();
       }
 
-      // 3. Fetch Tasks
+      // 5. Fetch advertiser tasks (old system)
       try {
         final allTasks = await _taskService.getAvailableTasks(
           forceRefresh: true,
@@ -232,20 +217,10 @@ class HomeViewModel extends ChangeNotifier {
                 .toList();
         _tasksLastUpdated = DateTime.now();
       } catch (e) {
-        debugPrint("Error fetching tasks: $e");
+        debugPrint("Error fetching advertiser tasks: $e");
       }
 
-      // 4. Fetch Recent Transactions
-      try {
-        _recentTransactions = await _walletService.getRecentTransactions(
-          limit: 5,
-        );
-        _transactionsLastUpdated = DateTime.now();
-      } catch (e) {
-        debugPrint("Error fetching transactions: $e");
-      }
-
-      // 5. Update cache
+      // 6. Update cache
       await _cacheAllData();
       _cacheLoaded = true;
     } catch (e) {
@@ -254,6 +229,138 @@ class HomeViewModel extends ChangeNotifier {
       if (!_cacheLoaded) {
         await _loadFromCache();
       }
+    }
+  }
+
+  // Future<void> _loadUserProfile() async {
+  //   try {
+  //     _userProfile = await _authService.getUserProfile();
+  //     if (_userProfile != null) {
+  //       _fullName = _userProfile!['full_name'] ?? 'User';
+  //       _profilePictureUrl = _userProfile!['avatar_url'];
+  //       _isMember = _userProfile!['is_member'] == true;
+  //       _profileLastUpdated = DateTime.now();
+  //     }
+  //   } catch (e) {
+  //     debugPrint('Error loading user profile: $e');
+  //   }
+  // }
+
+  Future<void> _loadUserProfile() async {
+  try {
+    // Use the consistent method
+    _userProfile = await _authService.getUserProfileConsistent();
+    if (_userProfile != null) {
+      _fullName = _userProfile!['full_name']?.toString() ?? 'User';
+      _profilePictureUrl = _userProfile!['avatar_url'];
+      _isMember = _userProfile!['is_member'] == true;
+      _profileLastUpdated = DateTime.now();
+      
+      // Debug logging
+      debugPrint('Profile loaded - Full Name: $_fullName, Is Member: $_isMember');
+    } else {
+      debugPrint('User profile is null');
+      
+      // Fallback: get from auth user
+      final user = _authService.getCurrentUser();
+      if (user != null) {
+        _fullName = user.userMetadata?['full_name']?.toString() ?? 'User';
+        _profilePictureUrl = user.userMetadata?['avatar_url'];
+        _isMember = false; // Default to non-member
+      }
+    }
+  } catch (e) {
+    debugPrint('Error loading user profile: $e');
+    
+    // Emergency fallback
+    final user = _authService.getCurrentUser();
+    if (user != null) {
+      _fullName = user.email?.split('@').first ?? 'User';
+      _isMember = false;
+    }
+  }
+}
+
+
+// Add a method to force profile refresh
+Future<void> refreshUserProfile({bool force = false}) async {
+  try {
+    if (!_isOffline) {
+      _userProfile = await _authService.getUserProfileConsistent();
+      if (_userProfile != null) {
+        _fullName = _userProfile!['full_name']?.toString() ?? 'User';
+        _profilePictureUrl = _userProfile!['avatar_url'];
+        _isMember = _userProfile!['is_member'] == true;
+        _profileLastUpdated = DateTime.now();
+        
+        // Update cache
+        await _cacheService.cacheProfile({
+          'full_name': _fullName,
+          'profile_picture_url': _profilePictureUrl,
+          'is_member': _isMember,
+        });
+        
+        notifyListeners();
+        debugPrint('Profile refreshed successfully');
+      }
+    }
+  } catch (e) {
+    debugPrint('Error refreshing profile: $e');
+  }
+}
+
+
+
+  Future<void> _loadWalletData() async {
+    try {
+      _wallet = await _walletService.getWallet();
+      _walletLastUpdated = DateTime.now();
+    } catch (e) {
+      debugPrint("Error fetching wallet: $e");
+      // Create a default wallet if none exists
+      final user = _authService.getCurrentUser();
+      _wallet = Wallet(
+        userId: user?.id ?? '',
+        currentBalance: 0.0,
+        availableBalance: 0.0,
+        lockedBalance: 0.0,
+        totalEarned: 0.0,
+        totalDeposited: 0.0,
+        totalWithdrawn: 0.0,
+        totalSpent: 0.0,
+        status: 'active',
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+      );
+    }
+  }
+
+  Future<void> _loadRecentTransactions() async {
+    try {
+      _recentTransactions = await _walletService.getRecentTransactions(
+        limit: 5,
+      );
+      _transactionsLastUpdated = DateTime.now();
+    } catch (e) {
+      debugPrint("Error fetching transactions: $e");
+    }
+  }
+
+  Future<void> _loadAvailableTasks() async {
+    try {
+      // Only load tasks if user is a member
+      if (!_isMember) {
+        _availableTasks = [];
+        return;
+      }
+
+      // Load available tasks for worker from new system
+      _availableTasks = await _authService.getAvailableTasksForWorker(
+        limit: 10,
+      );
+    } catch (e) {
+      debugPrint("Error loading available tasks: $e");
+      _availableTasks = [];
     }
   }
 
@@ -279,10 +386,14 @@ class HomeViewModel extends ChangeNotifier {
       await _cacheService.cacheProfile({
         'full_name': _fullName,
         'profile_picture_url': _profilePictureUrl,
+        'is_member': _isMember,
       });
 
-      // Cache tasks
+      // Cache advertiser tasks
       await _cacheService.cacheTasks(_tasks);
+
+      // Cache worker tasks
+      await _cacheService.cacheWorkerTasks(_availableTasks);
 
       // Cache transactions
       final transactionMaps =
@@ -350,14 +461,12 @@ class HomeViewModel extends ChangeNotifier {
       final cachedProfile = await _cacheService.getCachedProfile();
       _fullName = cachedProfile['full_name'] ?? 'User';
       _profilePictureUrl = cachedProfile['profile_picture_url'];
+      _isMember = cachedProfile['is_member'] == true;
 
       // 2. Load Wallet from cache
       final cachedWallet = await _cacheService.getCachedWallet();
       if (cachedWallet.isNotEmpty) {
-        final user =
-            _authService.isAuthenticated()
-                ? _authService.getCurrentUser()
-                : null;
+        final user = _authService.getCurrentUser();
         _wallet = Wallet(
           userId: user?.id ?? '',
           currentBalance:
@@ -379,10 +488,13 @@ class HomeViewModel extends ChangeNotifier {
         );
       }
 
-      // 3. Load Tasks from cache
+      // 3. Load Advertiser Tasks from cache
       _tasks = await _cacheService.getCachedTasks();
 
-      // 4. Load Transactions from cache
+      // 4. Load Worker Tasks from cache
+      _availableTasks = await _cacheService.getCachedWorkerTasks();
+
+      // 5. Load Transactions from cache
       final cachedTransactionMaps = await _cacheService.getCachedTransactions();
       _recentTransactions =
           cachedTransactionMaps.map((map) {
@@ -434,12 +546,12 @@ class HomeViewModel extends ChangeNotifier {
   }
 
   Future<void> _refreshNetworkData() async {
-    final isTasksStale =
-        _tasksLastUpdated == null ||
-        DateTime.now().difference(_tasksLastUpdated!) >
+    final isDataStale =
+        _walletLastUpdated == null ||
+        DateTime.now().difference(_walletLastUpdated!) >
             const Duration(minutes: 5);
 
-    if (isTasksStale) {
+    if (isDataStale) {
       try {
         await _fetchFromNetwork();
         notifyListeners();
@@ -501,11 +613,24 @@ class HomeViewModel extends ChangeNotifier {
     }
   }
 
+  Future<void> refreshAvailableTasks() async {
+    if (!_isOffline) {
+      try {
+        await _loadAvailableTasks();
+        notifyListeners();
+      } catch (e) {
+        debugPrint("Error refreshing available tasks: $e");
+      }
+    }
+  }
+
   Map<String, dynamic> getCacheStatus() {
     return {
       'is_offline': _isOffline,
       'cache_loaded': _cacheLoaded,
+      'is_member': _isMember,
       'tasks_count': _tasks.length,
+      'available_tasks_count': _availableTasks.length,
       'wallet_balance': _wallet?.currentBalance ?? 0.0,
       'transactions_count': _recentTransactions.length,
       'tasks_last_updated': _tasksLastUpdated?.toIso8601String(),
@@ -519,16 +644,37 @@ class HomeViewModel extends ChangeNotifier {
     await _cacheService.clearCache();
     _cacheLoaded = false;
     _tasks.clear();
+    _availableTasks.clear();
     _recentTransactions.clear();
     _wallet = null;
     _fullName = 'User';
     _profilePictureUrl = null;
+    _isMember = false;
     notifyListeners();
   }
 
-  // Navigation methods
+  void clearData() {
+    _wallet = null;
+    _tasks.clear();
+    _availableTasks.clear();
+    _recentTransactions.clear();
+    _fullName = 'User';
+    _profilePictureUrl = null;
+    _isMember = false;
+    notifyListeners();
+  }
+
+  // ============ NAVIGATION METHODS ============
+
   void navigateToTaskDetails(BuildContext context, TaskModel task) {
     Navigator.pushNamed(context, '/task-details', arguments: task.toMap());
+  }
+
+  void navigateToWorkerTaskDetails(
+    BuildContext context,
+    Map<String, dynamic> task,
+  ) {
+    // Navigate to worker task execution
   }
 
   void navigateToFundWallet(BuildContext context) {
@@ -547,22 +693,29 @@ class HomeViewModel extends ChangeNotifier {
     Navigator.pushNamed(context, '/advert-upload');
   }
 
-  void navigateToEarnSelection(BuildContext context) {
-    Navigator.pushNamed(context, '/earn-selection');
+  void navigateToEarnView(BuildContext context) {
+    Navigator.pushNamed(context, '/earn');
   }
 
   // ============ HELPER METHODS ============
 
+  // Platform helpers
   IconData getPlatformIcon(String platform) =>
       PlatformHelper.getPlatformIcon(platform);
+
   Color getPlatformColor(String platform) =>
       PlatformHelper.getPlatformColor(platform);
+
   String getPlatformDisplayName(String platform) =>
       PlatformHelper.getPlatformDisplayName(platform);
+
+  // Task helpers
   IconData getTaskCategoryIcon(String category) =>
       TaskHelper.getTaskCategoryIcon(category);
+
   Color getTaskCategoryColor(String category) =>
       TaskHelper.getTaskCategoryColor(category);
+
   String getTaskCategoryDisplayName(String category) =>
       TaskHelper.getTaskCategoryDisplayName(category);
 
@@ -570,16 +723,13 @@ class HomeViewModel extends ChangeNotifier {
     return TaskHelper.getTaskCategoryIcon(task.category);
   }
 
-  List<String> getSupportedPlatformsForCategory(String taskCategory) {
-    return TaskHelper.getSupportedPlatforms(taskCategory);
-  }
-
-  bool validatePlatformForTask(String taskType, String platform) {
-    return TaskHelper.validateTaskForPlatform(taskType, platform);
-  }
-
+  // Wallet/Transaction helpers
   IconData getTransactionIcon(String transactionType) {
     return WalletService.getTransactionIcon(transactionType);
+  }
+
+  String formatTransactionType(String type) {
+    return WalletService.formatTransactionType(type);
   }
 
   Color getTransactionColor(String transactionType) {
@@ -604,10 +754,6 @@ class HomeViewModel extends ChangeNotifier {
 
   String formatCurrency(double amount) => '₦${amount.toStringAsFixed(2)}';
 
-  String formatTransactionType(String type) {
-    return WalletService.formatTransactionType(type);
-  }
-
   String formatRelativeDate(DateTime date) {
     final now = DateTime.now();
     final difference = now.difference(date);
@@ -621,64 +767,39 @@ class HomeViewModel extends ChangeNotifier {
     return 'Just now';
   }
 
-  Future<Map<String, dynamic>> checkBalanceForPurchase(double amount) async {
-    try {
-      return await _walletService.checkBalance(amount);
-    } catch (e) {
-      return {
-        'success': false,
-        'has_sufficient': false,
-        'current_balance': _wallet?.currentBalance ?? 0.0,
-        'available_balance': _wallet?.availableBalance ?? 0.0,
-        'required_amount': amount,
-        'deficit': amount,
-        'isWalletLocked': _wallet?.isLocked ?? false,
-      };
-    }
-  }
+  // ============ TASK FILTERING METHODS ============
 
-  Future<Map<String, dynamic>> getUserStatistics() async {
-    try {
-      final dashboardStats = await _walletService.getDashboardStats();
-      return {
-        'wallet': dashboardStats.wallet.toJson(),
-        'stats': {
-          'today_income': dashboardStats.today.totalIncome,
-          'today_expenses': dashboardStats.today.totalExpenses,
-          'week_income': dashboardStats.week.totalIncome,
-          'week_expenses': dashboardStats.week.totalExpenses,
-          'month_income': dashboardStats.month.totalIncome,
-          'month_expenses': dashboardStats.month.totalExpenses,
-          'transaction_count': dashboardStats.month.transactionCount,
-        },
-      };
-    } catch (e) {
-      debugPrint("Error getting user statistics: $e");
-      return {
-        'wallet': _wallet?.toJson() ?? {},
-        'stats': {
-          'today_income': 0.0,
-          'today_expenses': 0.0,
-          'week_income': 0.0,
-          'week_expenses': 0.0,
-          'month_income': 0.0,
-          'month_expenses': 0.0,
-          'transaction_count': 0,
-        },
-      };
-    }
+  List<TaskModel> filterTasks({
+    String? category,
+    List<String>? categories,
+    String? platform,
+    double? minPrice,
+    double? maxPrice,
+    bool? featuredOnly,
+    List<String>? tags,
+    String? searchQuery,
+  }) {
+    return _tasks.where((task) {
+      if (category != null && task.category != category) return false;
+      if (categories != null && !categories.contains(task.category)) {
+        return false;
+      }
+      if (platform != null && !task.platforms.contains(platform)) return false;
+      if (minPrice != null && task.price < minPrice) return false;
+      if (maxPrice != null && task.price > maxPrice) return false;
+      if (featuredOnly == true && !task.isFeatured) return false;
+      if (tags != null && !tags.any((tag) => task.tags.contains(tag))) {
+        return false;
+      }
+      if (searchQuery != null && searchQuery.isNotEmpty) {
+        final query = searchQuery.toLowerCase();
+        return task.title.toLowerCase().contains(query) ||
+            task.description.toLowerCase().contains(query) ||
+            task.tags.any((tag) => tag.toLowerCase().contains(query));
+      }
+      return true;
+    }).toList();
   }
-
-  void clearData() {
-    _wallet = null;
-    _tasks.clear();
-    _recentTransactions.clear();
-    _fullName = 'User';
-    _profilePictureUrl = null;
-    notifyListeners();
-  }
-
-  // ============ TASK MANAGEMENT METHODS ============
 
   List<TaskModel> getFeaturedTasks() =>
       _tasks.where((task) => task.isFeatured).toList();
@@ -739,45 +860,46 @@ class HomeViewModel extends ChangeNotifier {
   bool hasTaskMetadata(TaskModel task, String key) =>
       task.metadata.containsKey(key);
 
-  // ============ PLATFORM METHODS ============
+  // ============ WORKER TASK METHODS ============
 
-  Widget getPlatformWidget({
-    required String platform,
-    double iconSize = 24.0,
-    bool showLabel = false,
-    TextStyle? labelStyle,
-    bool circleBackground = false,
-  }) {
-    return PlatformHelper.getPlatformWidget(
-      platform: platform,
-      iconSize: iconSize,
-      showLabel: showLabel,
-      labelStyle: labelStyle,
-      circleBackground: circleBackground,
-    );
+  Map<String, dynamic>? getWorkerTaskByQueueId(String queueId) {
+    try {
+      return _availableTasks.firstWhere((task) => task['queue_id'] == queueId);
+    } catch (e) {
+      return null;
+    }
   }
 
-  Widget getPlatformChip({
-    required String platform,
-    VoidCallback? onTap,
-    bool selected = false,
-  }) {
-    return PlatformHelper.getPlatformChip(
-      platform: platform,
-      onTap: onTap,
-      selected: selected,
-    );
+  List<Map<String, dynamic>> getWorkerTasksByPlatform(String platform) {
+    if (platform.isEmpty) return _availableTasks;
+    return _availableTasks.where((task) {
+      final taskPlatform = task['platform']?.toString().toLowerCase() ?? '';
+      return taskPlatform == platform.toLowerCase();
+    }).toList();
   }
 
-  List<String> getAllPlatforms() => PlatformHelper.getAllPlatforms();
-  List<String> getPlatformsByCategory(String category) =>
-      PlatformHelper.getPlatformsByCategory(category);
-  Map<String, dynamic> getPlatformMetadata(String platform) =>
-      PlatformHelper.getPlatformMetadata(platform);
+  List<Map<String, dynamic>> searchWorkerTasks(String query) {
+    if (query.isEmpty) return _availableTasks;
+    final queryLower = query.toLowerCase();
+    return _availableTasks.where((task) {
+      final title = task['task_title']?.toString().toLowerCase() ?? '';
+      final description =
+          task['task_description']?.toString().toLowerCase() ?? '';
+      return title.contains(queryLower) || description.contains(queryLower);
+    }).toList();
+  }
+
+  double getTotalAvailablePayout() {
+    return _availableTasks.fold(0.0, (sum, task) {
+      final payout = (task['payout_amount'] as num?)?.toDouble() ?? 0.0;
+      return sum + payout;
+    });
+  }
 
   // ============ UTILITY METHODS ============
 
   Map<String, dynamic> taskToMap(TaskModel task) => task.toMap();
+
   List<Map<String, dynamic>> tasksToMaps(List<TaskModel> tasks) =>
       tasks.map((task) => task.toMap()).toList();
 
@@ -810,80 +932,6 @@ class HomeViewModel extends ChangeNotifier {
               : a.createdAt.compareTo(b.createdAt),
     );
     return sorted;
-  }
-
-  List<TaskModel> filterTasks({
-    String? category,
-    List<String>? categories,
-    String? platform,
-    double? minPrice,
-    double? maxPrice,
-    bool? featuredOnly,
-    List<String>? tags,
-    String? searchQuery,
-  }) {
-    return _tasks.where((task) {
-      if (category != null && task.category != category) return false;
-      if (categories != null && !categories.contains(task.category)) {
-        return false;
-      }
-      if (platform != null && !task.platforms.contains(platform)) return false;
-      if (minPrice != null && task.price < minPrice) return false;
-      if (maxPrice != null && task.price > maxPrice) return false;
-      if (featuredOnly == true && !task.isFeatured) return false;
-      if (tags != null && !tags.any((tag) => task.tags.contains(tag))) {
-        return false;
-      }
-      if (searchQuery != null && searchQuery.isNotEmpty) {
-        final query = searchQuery.toLowerCase();
-        return task.title.toLowerCase().contains(query) ||
-            task.description.toLowerCase().contains(query) ||
-            task.tags.any((tag) => tag.toLowerCase().contains(query));
-      }
-      return true;
-    }).toList();
-  }
-
-  List<String> getAllUniqueTags() {
-    final Set<String> uniqueTags = {};
-    for (final task in _tasks) {
-      uniqueTags.addAll(task.tags);
-    }
-    return uniqueTags.toList()..sort();
-  }
-
-  List<TaskModel> getTasksWithMetadata(String metadataKey) {
-    return _tasks
-        .where((task) => task.metadata.containsKey(metadataKey))
-        .toList();
-  }
-
-  double getAverageTaskPrice() {
-    if (_tasks.isEmpty) return 0.0;
-    return getTotalTasksValue() / _tasks.length;
-  }
-
-  List<TaskModel> getNewestTasks({int days = 7}) {
-    final cutoffDate = DateTime.now().subtract(Duration(days: days));
-    return _tasks.where((task) => task.createdAt.isAfter(cutoffDate)).toList();
-  }
-
-  Map<String, List<TaskModel>> getTasksGroupedByCategory() {
-    final Map<String, List<TaskModel>> grouped = {};
-    for (final task in _tasks) {
-      grouped.putIfAbsent(task.category, () => []).add(task);
-    }
-    return grouped;
-  }
-
-  Map<String, List<TaskModel>> getTasksGroupedByPlatform() {
-    final Map<String, List<TaskModel>> grouped = {};
-    for (final task in _tasks) {
-      for (final platform in task.platforms) {
-        grouped.putIfAbsent(platform, () => []).add(task);
-      }
-    }
-    return grouped;
   }
 
   @override

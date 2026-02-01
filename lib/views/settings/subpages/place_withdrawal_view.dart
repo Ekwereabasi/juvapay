@@ -1,6 +1,13 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:http/http.dart' as http;
+import 'package:device_info_plus/device_info_plus.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:juvapay/services/supabase_auth_service.dart';
 import 'package:juvapay/view_models/wallet_view_model.dart';
 import 'update_bank_details_view.dart';
@@ -15,11 +22,20 @@ class WithdrawView extends StatefulWidget {
 
 class _WithdrawViewState extends State<WithdrawView> {
   final SupabaseAuthService _authService = SupabaseAuthService();
+  final DeviceInfoPlugin _deviceInfo = DeviceInfoPlugin();
+  final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
+
+  PackageInfo? _packageInfo;
+  SharedPreferences? _prefs;
 
   // State Management
   bool _isLoading = true;
   bool _isProcessing = false;
   Map<String, dynamic>? _bankDetails;
+
+  // Rate limiting
+  static const int _withdrawalCooldownHours = 1; // 1 hour cooldown
+  static const int _maxWithdrawalsPerDay = 5; // Maximum withdrawals per day
 
   // Controllers
   final TextEditingController _amountController = TextEditingController();
@@ -29,7 +45,28 @@ class _WithdrawViewState extends State<WithdrawView> {
   @override
   void initState() {
     super.initState();
-    _loadData();
+    _initData();
+  }
+
+  Future<void> _initData() async {
+    try {
+      await Future.wait([
+        _initPackageInfo(),
+        _initSharedPreferences(),
+        _loadData(),
+      ]);
+    } catch (e) {
+      print('Initialization error: $e');
+      if (mounted) _showTopSnackbar('Failed to initialize: $e', isError: true);
+    }
+  }
+
+  Future<void> _initPackageInfo() async {
+    _packageInfo = await PackageInfo.fromPlatform();
+  }
+
+  Future<void> _initSharedPreferences() async {
+    _prefs = await SharedPreferences.getInstance();
   }
 
   @override
@@ -59,13 +96,72 @@ class _WithdrawViewState extends State<WithdrawView> {
         }
       }
     } catch (e) {
-      if (mounted) _showTopSnackBar(e.toString(), isError: true);
+      if (mounted) _showTopSnackbar(e.toString(), isError: true);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
+  Future<bool> _checkWithdrawalLimits() async {
+    if (_prefs == null) return true;
+
+    final now = DateTime.now();
+    final lastWithdrawalTime = _prefs!.getInt('last_withdrawal_time') ?? 0;
+    final withdrawalsToday = _prefs!.getInt('withdrawals_today') ?? 0;
+    final lastResetDate = _prefs!.getString('withdrawals_reset_date') ?? '';
+
+    // Reset daily counter if it's a new day
+    final today = DateFormat('yyyy-MM-dd').format(now);
+    if (lastResetDate != today) {
+      await _prefs!.setInt('withdrawals_today', 0);
+      await _prefs!.setString('withdrawals_reset_date', today);
+      return true;
+    }
+
+    // Check daily limit
+    if (withdrawalsToday >= _maxWithdrawalsPerDay) {
+      _showTopSnackbar(
+        'Daily withdrawal limit reached. Maximum $_maxWithdrawalsPerDay withdrawals per day.',
+        isError: true,
+      );
+      return false;
+    }
+
+    // Check cooldown period
+    final lastWithdrawal = DateTime.fromMillisecondsSinceEpoch(
+      lastWithdrawalTime,
+    );
+    final hoursSinceLast = now.difference(lastWithdrawal).inHours;
+
+    if (hoursSinceLast < _withdrawalCooldownHours) {
+      final remainingHours = _withdrawalCooldownHours - hoursSinceLast;
+      final remainingMinutes = (remainingHours * 60).ceil();
+
+      _showTopSnackbar(
+        'Please wait $remainingMinutes minutes before making another withdrawal.',
+        isError: true,
+      );
+      return false;
+    }
+
+    return true;
+  }
+
+  Future<void> _updateWithdrawalLimits() async {
+    if (_prefs == null) return;
+
+    final now = DateTime.now();
+    await _prefs!.setInt('last_withdrawal_time', now.millisecondsSinceEpoch);
+
+    final withdrawalsToday = _prefs!.getInt('withdrawals_today') ?? 0;
+    await _prefs!.setInt('withdrawals_today', withdrawalsToday + 1);
+  }
+
   Future<void> _handleWithdraw() async {
+    // Check withdrawal limits
+    final canWithdraw = await _checkWithdrawalLimits();
+    if (!canWithdraw) return;
+
     final walletViewModel = context.read<WalletViewModel>();
     final amountText = _amountController.text.replaceAll(
       RegExp(r'[^0-9.]'),
@@ -129,26 +225,41 @@ class _WithdrawViewState extends State<WithdrawView> {
       };
 
       // Validate bank details
-      if (bankDetails['account_number']?.isEmpty ??
-          true || bankDetails['account_name']?.isEmpty ??
-          true || bankDetails['bank_name']?.isEmpty ??
-          true) {
+      final accountNumber = bankDetails['account_number']?.isEmpty ?? true;
+      final accountName = bankDetails['account_name']?.isEmpty ?? true;
+      final bankName = bankDetails['bank_name']?.isEmpty ?? true;
+
+      if (accountNumber || accountName || bankName) {
         throw Exception(
           'Invalid bank details. Please update your bank information.',
         );
       }
+
+      // Get actual IP address and user agent
+      final ipAddress = await _getIpAddress();
+      final userAgent = await _getUserAgent();
+
+      // Store sensitive data securely
+      await _secureStorage.write(key: 'last_withdrawal_ip', value: ipAddress);
+      await _secureStorage.write(
+        key: 'last_withdrawal_time',
+        value: DateTime.now().toIso8601String(),
+      );
 
       // Process withdrawal using WalletViewModel
       final result = await walletViewModel.processWithdrawal(
         amount: amount,
         bankDetails: bankDetails,
         description: 'Withdrawal to ${bankDetails['bank_name']}',
-        ipAddress: '127.0.0.1', // You should get actual IP address
-        userAgent: 'Flutter App', // You should get actual user agent
+        ipAddress: ipAddress,
+        userAgent: userAgent,
       );
 
       if (result['success'] == true) {
         if (mounted) {
+          // Update withdrawal limits
+          await _updateWithdrawalLimits();
+
           _showTopSnackbar(
             'Withdrawal request submitted successfully!',
             isError: false,
@@ -176,6 +287,114 @@ class _WithdrawViewState extends State<WithdrawView> {
     } finally {
       if (mounted) setState(() => _isProcessing = false);
     }
+  }
+
+  // Get IP address using multiple fallback methods with better error handling
+  Future<String> _getIpAddress() async {
+    final fallbackUrls = [
+      'https://api.ipify.org',
+      'https://api64.ipify.org',
+      'https://ipinfo.io/ip',
+      'https://ifconfig.me/ip',
+      'https://icanhazip.com',
+    ];
+
+    for (final url in fallbackUrls) {
+      try {
+        final response = await http
+            .get(Uri.parse(url), headers: {'Accept': 'text/plain'})
+            .timeout(const Duration(seconds: 3));
+
+        if (response.statusCode == 200) {
+          final ip = response.body.trim();
+          if (ip.isNotEmpty && _isValidIpAddress(ip)) {
+            return ip;
+          }
+        }
+      } catch (e) {
+        print('IP fetch failed from $url: $e');
+        continue;
+      }
+    }
+
+    // If all methods fail, return timestamp-based unique identifier
+    return '${DateTime.now().millisecondsSinceEpoch}_fallback';
+  }
+
+  bool _isValidIpAddress(String ip) {
+    // Basic IP validation
+    final ipv4Regex = RegExp(
+      r'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$',
+    );
+    final ipv6Regex = RegExp(
+      r'^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))$',
+    );
+
+    return ipv4Regex.hasMatch(ip) || ipv6Regex.hasMatch(ip);
+  }
+
+  // Get detailed user agent
+  Future<String> _getUserAgent() async {
+    try {
+      final packageInfo = _packageInfo ?? await PackageInfo.fromPlatform();
+      final appName = packageInfo.appName;
+      final appVersion = packageInfo.version;
+      final buildNumber = packageInfo.buildNumber;
+
+      String deviceInfo = '';
+
+      if (Platform.isAndroid) {
+        final androidInfo = await _deviceInfo.androidInfo;
+        deviceInfo =
+            'Android ${androidInfo.version.release} (SDK ${androidInfo.version.sdkInt}); ${androidInfo.model} (${androidInfo.brand})';
+      } else if (Platform.isIOS) {
+        final iosInfo = await _deviceInfo.iosInfo;
+        deviceInfo =
+            'iOS ${iosInfo.systemVersion}; ${iosInfo.utsname.machine} (${iosInfo.model})';
+      } else if (kIsWeb) {
+        deviceInfo = 'Web/${_getBrowserInfo()}';
+      } else if (Platform.isWindows) {
+        final windowsInfo = await _deviceInfo.windowsInfo;
+        deviceInfo =
+            'Windows ${windowsInfo.computerName} (${windowsInfo.buildNumber})';
+      } else if (Platform.isMacOS) {
+        final macInfo = await _deviceInfo.macOsInfo;
+        deviceInfo = 'macOS ${macInfo.kernelVersion} (${macInfo.model})';
+      } else if (Platform.isLinux) {
+        final linuxInfo = await _deviceInfo.linuxInfo;
+        deviceInfo = 'Linux ${linuxInfo.prettyName} (${linuxInfo.version})';
+      }
+
+      // Include platform info
+      final platform = _getPlatform();
+
+      return '$appName/$appVersion ($buildNumber) [$platform] $deviceInfo';
+    } catch (e) {
+      print('Error getting user agent: $e');
+      return 'JuvaPay/${DateTime.now().year}';
+    }
+  }
+
+  String _getPlatform() {
+    if (kIsWeb) return 'Web';
+    if (Platform.isAndroid) return 'Android';
+    if (Platform.isIOS) return 'iOS';
+    if (Platform.isWindows) return 'Windows';
+    if (Platform.isMacOS) return 'macOS';
+    if (Platform.isLinux) return 'Linux';
+    return 'Unknown';
+  }
+
+  String _getBrowserInfo() {
+    // Simple browser detection for web
+    if (kIsWeb) {
+      final userAgent = defaultTargetPlatform.toString();
+      if (userAgent.contains('Chrome')) return 'Chrome';
+      if (userAgent.contains('Safari')) return 'Safari';
+      if (userAgent.contains('Firefox')) return 'Firefox';
+      if (userAgent.contains('Edge')) return 'Edge';
+    }
+    return 'Browser';
   }
 
   void _showSuccessDialog(
@@ -332,20 +551,23 @@ class _WithdrawViewState extends State<WithdrawView> {
       appBar: AppBar(
         title: Text(
           'Withdraw',
-          style: theme.appBarTheme.titleTextStyle?.copyWith(
-            fontWeight: FontWeight.bold,
-          ),
+          style: Theme.of(
+            context,
+          ).appBarTheme.titleTextStyle?.copyWith(fontWeight: FontWeight.bold),
         ),
         centerTitle: true,
         elevation: 0,
         leading: IconButton(
           icon: Icon(
             Icons.arrow_back_ios_new,
-            color: theme.iconTheme.color,
+            color: Theme.of(context).appBarTheme.iconTheme?.color,
             size: 20,
           ),
           onPressed: () => Navigator.pop(context),
         ),
+        backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
+        iconTheme: Theme.of(context).appBarTheme.iconTheme,
+        actionsIconTheme: Theme.of(context).appBarTheme.actionsIconTheme,
       ),
       body:
           _isLoading || walletViewModel.isLoading
@@ -375,6 +597,11 @@ class _WithdrawViewState extends State<WithdrawView> {
 
                       const SizedBox(height: 25),
 
+                      // Withdrawal limits info
+                      _buildWithdrawalLimitsInfo(),
+
+                      const SizedBox(height: 25),
+
                       // Withdrawal History Button
                       SizedBox(
                         width: double.infinity,
@@ -383,8 +610,7 @@ class _WithdrawViewState extends State<WithdrawView> {
                             Navigator.push(
                               context,
                               MaterialPageRoute(
-                                builder:
-                                    (context) => const WalletHistoryPage(),
+                                builder: (context) => const WalletHistoryPage(),
                               ),
                             );
                           },
@@ -409,6 +635,29 @@ class _WithdrawViewState extends State<WithdrawView> {
                   ),
                 ),
               ),
+    );
+  }
+
+  Widget _buildWithdrawalLimitsInfo() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.blue.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.blue.withOpacity(0.1)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.info, color: Colors.blue, size: 16),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Withdrawal Limits: Maximum $_maxWithdrawalsPerDay per day, $_withdrawalCooldownHours hour cooldown between withdrawals.',
+              style: TextStyle(fontSize: 11, color: Colors.blue.shade700),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -501,9 +750,7 @@ class _WithdrawViewState extends State<WithdrawView> {
             onPressed: () async {
               await Navigator.push(
                 context,
-                MaterialPageRoute(
-                  builder: (_) => const BankAccountScreen(),
-                ),
+                MaterialPageRoute(builder: (_) => const BankAccountScreen()),
               );
               _loadData();
             },

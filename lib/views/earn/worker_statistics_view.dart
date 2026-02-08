@@ -33,16 +33,16 @@ class _WorkerStatisticsViewState extends State<WorkerStatisticsView> {
     try {
       final stats = await _authService.getWorkerStatistics();
 
-      // Debug print
       debugPrint('Statistics response: $stats');
 
       if (stats['success'] == true) {
         setState(() {
-          // Ensure we have the data in the right format
+          // Safely parse the data with proper type conversion
           if (stats['data'] is Map<String, dynamic>) {
-            _statistics = stats['data'] as Map<String, dynamic>;
+            final rawData = stats['data'] as Map<String, dynamic>;
+            _statistics = _parseStatistics(rawData);
           } else {
-            // If data is not a map, create default
+            // Create default statistics
             _statistics = {
               'total_earnings': 0.0,
               'total_tasks_completed': 0,
@@ -69,6 +69,50 @@ class _WorkerStatisticsViewState extends State<WorkerStatisticsView> {
         _isLoading = false;
       });
     }
+  }
+
+  Map<String, dynamic> _parseStatistics(Map<String, dynamic> rawData) {
+    // Helper function to safely parse values
+    double _parseDouble(dynamic value) {
+      if (value == null) return 0.0;
+      if (value is int) return value.toDouble();
+      if (value is double) return value;
+      if (value is String) {
+        try {
+          return double.tryParse(value) ?? 0.0;
+        } catch (_) {
+          return 0.0;
+        }
+      }
+      return 0.0;
+    }
+
+    int _parseInt(dynamic value) {
+      if (value == null) return 0;
+      if (value is int) return value;
+      if (value is double) return value.toInt();
+      if (value is String) {
+        try {
+          return int.tryParse(value) ?? 0;
+        } catch (_) {
+          return 0;
+        }
+      }
+      return 0;
+    }
+
+    return {
+      'total_earnings': _parseDouble(rawData['total_earnings']),
+      'total_tasks_completed': _parseInt(rawData['total_tasks_completed']),
+      'average_rating': _parseDouble(rawData['average_rating']),
+      'success_rate': _parseDouble(rawData['success_rate']),
+      'pending_payouts': _parseDouble(rawData['pending_payouts']),
+      'available_tasks': _parseInt(rawData['available_tasks']),
+      'wallet_balance': _parseDouble(rawData['wallet_balance']),
+      'wallet_available_balance': _parseDouble(
+        rawData['wallet_available_balance'],
+      ),
+    };
   }
 
   @override
@@ -340,37 +384,6 @@ class _WorkerStatisticsViewState extends State<WorkerStatisticsView> {
                         ),
                       ),
                     ),
-
-                    const SizedBox(height: 16),
-
-                    // Debug Info (remove in production)
-                    if (_statistics != null)
-                      Card(
-                        color: Colors.grey[50],
-                        child: Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'Debug Info:',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'Data loaded: ${_statistics!.keys.length} fields',
-                                style: const TextStyle(
-                                  fontSize: 10,
-                                  color: Colors.grey,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
                   ],
                 ),
               ),

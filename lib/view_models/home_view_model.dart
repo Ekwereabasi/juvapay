@@ -161,7 +161,33 @@ class HomeViewModel extends ChangeNotifier {
     }
   }
 
-  Future<void> loadDashboardData() async {
+  // Future<void> loadDashboardData() async {
+  //   _isLoading = true;
+  //   notifyListeners();
+
+  //   try {
+  //     final isConnected = await _networkService.isConnected();
+  //     _isOffline = !isConnected;
+
+  //     if (isConnected) {
+  //       await _fetchFromNetwork();
+  //     } else {
+  //       await _loadFromCache();
+  //     }
+  //   } catch (e) {
+  //     debugPrint("Error loading dashboard: $e");
+
+  //     if (!_cacheLoaded) {
+  //       await _loadFromCache();
+  //     }
+  //   } finally {
+  //     _isLoading = false;
+  //     notifyListeners();
+  //   }
+  // }
+
+
+Future<void> loadDashboardData() async {
     _isLoading = true;
     notifyListeners();
 
@@ -174,16 +200,44 @@ class HomeViewModel extends ChangeNotifier {
       } else {
         await _loadFromCache();
       }
-    } catch (e) {
-      debugPrint("Error loading dashboard: $e");
+    } catch (e, stackTrace) {
+      debugPrint("❌ Error loading dashboard: $e");
+      debugPrint("Stack trace: $stackTrace");
 
+      // Try to load from cache if network fails
       if (!_cacheLoaded) {
         await _loadFromCache();
       }
+
+      // Show error but don't crash
+      _showErrorState();
     } finally {
       _isLoading = false;
       notifyListeners();
     }
+  }
+
+  void _showErrorState() {
+  // Set default values to prevent crashes
+  _fullName = 'User';
+  _isMember = false;
+  _availableTasks = [];
+  _tasks = [];
+
+    final user = _authService.getCurrentUser();
+    _wallet = Wallet(
+      userId: user?.id ?? '',
+      currentBalance: 0.0,
+      availableBalance: 0.0,
+      lockedBalance: 0.0,
+      totalEarned: 0.0,
+      totalDeposited: 0.0,
+      totalWithdrawn: 0.0,
+      totalSpent: 0.0,
+      status: 'active',
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+    );
   }
 
   Future<void> _fetchFromNetwork() async {
@@ -232,55 +286,86 @@ class HomeViewModel extends ChangeNotifier {
     }
   }
 
-  // Future<void> _loadUserProfile() async {
-  //   try {
-  //     _userProfile = await _authService.getUserProfile();
-  //     if (_userProfile != null) {
-  //       _fullName = _userProfile!['full_name'] ?? 'User';
-  //       _profilePictureUrl = _userProfile!['avatar_url'];
-  //       _isMember = _userProfile!['is_member'] == true;
-  //       _profileLastUpdated = DateTime.now();
-  //     }
-  //   } catch (e) {
-  //     debugPrint('Error loading user profile: $e');
-  //   }
-  // }
+
+
+//   Future<void> _loadUserProfile() async {
+//   try {
+//     // Use the consistent method
+//     _userProfile = await _authService.getUserProfileConsistent();
+//     if (_userProfile != null) {
+//       _fullName = _userProfile!['full_name']?.toString() ?? 'User';
+//       _profilePictureUrl = _userProfile!['avatar_url'];
+//       _isMember = _userProfile!['is_member'] == true;
+//       _profileLastUpdated = DateTime.now();
+      
+//       // Debug logging
+//       debugPrint('Profile loaded - Full Name: $_fullName, Is Member: $_isMember');
+//     } else {
+//       debugPrint('User profile is null');
+      
+//       // Fallback: get from auth user
+//       final user = _authService.getCurrentUser();
+//       if (user != null) {
+//         _fullName = user.userMetadata?['full_name']?.toString() ?? 'User';
+//         _profilePictureUrl = user.userMetadata?['avatar_url'];
+//         _isMember = false; // Default to non-member
+//       }
+//     }
+//   } catch (e) {
+//     debugPrint('Error loading user profile: $e');
+    
+//     // Emergency fallback
+//     final user = _authService.getCurrentUser();
+//     if (user != null) {
+//       _fullName = user.email?.split('@').first ?? 'User';
+//       _isMember = false;
+//     }
+//   }
+// }
+
+
+// In home_view_model.dart, update the _loadUserProfile method:
 
   Future<void> _loadUserProfile() async {
-  try {
-    // Use the consistent method
-    _userProfile = await _authService.getUserProfileConsistent();
-    if (_userProfile != null) {
-      _fullName = _userProfile!['full_name']?.toString() ?? 'User';
-      _profilePictureUrl = _userProfile!['avatar_url'];
-      _isMember = _userProfile!['is_member'] == true;
-      _profileLastUpdated = DateTime.now();
-      
-      // Debug logging
-      debugPrint('Profile loaded - Full Name: $_fullName, Is Member: $_isMember');
-    } else {
-      debugPrint('User profile is null');
-      
-      // Fallback: get from auth user
+    try {
+      // Use the consistent method from SupabaseAuthService
+      _userProfile = await _authService.getUserProfileConsistent();
+
+      if (_userProfile != null) {
+        _fullName = _userProfile!['full_name']?.toString() ?? 'User';
+        _profilePictureUrl = _userProfile!['avatar_url'];
+        _isMember = _userProfile!['is_member'] == true;
+        _profileLastUpdated = DateTime.now();
+
+        debugPrint(
+          '✅ Profile loaded successfully: $_fullName, Is Member: $_isMember',
+        );
+      } else {
+        debugPrint('⚠️ User profile is null');
+
+        // Fallback: get from auth user
+        final user = _authService.getCurrentUser();
+        if (user != null) {
+          _fullName =
+              user.userMetadata?['full_name']?.toString() ??
+              user.email?.split('@').first ??
+              'User';
+          _profilePictureUrl = user.userMetadata?['avatar_url'];
+          _isMember = false; // Default to non-member
+        }
+      }
+    } catch (e, stackTrace) {
+      debugPrint('❌ Error loading user profile: $e');
+      debugPrint('Stack trace: $stackTrace');
+
+      // Emergency fallback
       final user = _authService.getCurrentUser();
       if (user != null) {
-        _fullName = user.userMetadata?['full_name']?.toString() ?? 'User';
-        _profilePictureUrl = user.userMetadata?['avatar_url'];
-        _isMember = false; // Default to non-member
+        _fullName = user.email?.split('@').first ?? 'User';
+        _isMember = false;
       }
     }
-  } catch (e) {
-    debugPrint('Error loading user profile: $e');
-    
-    // Emergency fallback
-    final user = _authService.getCurrentUser();
-    if (user != null) {
-      _fullName = user.email?.split('@').first ?? 'User';
-      _isMember = false;
-    }
   }
-}
-
 
 // Add a method to force profile refresh
 Future<void> refreshUserProfile({bool force = false}) async {

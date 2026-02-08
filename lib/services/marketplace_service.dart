@@ -99,6 +99,7 @@ class MarketplaceService {
       throw Exception('Failed to create product: $e');
     }
   }
+  
 
   Future<String> _uploadProductImage({
     required int productId,
@@ -141,6 +142,7 @@ class MarketplaceService {
     }
   }
 
+  // Updated getProducts method
   Future<List<MarketplaceProduct>> getProducts({
     String? category,
     int? stateId,
@@ -154,14 +156,22 @@ class MarketplaceService {
     int offset = 0,
   }) async {
     try {
-      // FIX: Use 'dynamic' here to allow the type to change from FilterBuilder to TransformBuilder
+      debugPrint('Fetching products with params:');
+      debugPrint('  Category: $category');
+      debugPrint('  State: $stateId');
+      debugPrint('  LGA: $lgaId');
+      debugPrint('  Search: $searchQuery');
+      debugPrint('  Sort: $sortBy');
+      debugPrint('  Limit: $limit, Offset: $offset');
+
+      // Build base query - use dynamic type to handle different builder types
       dynamic query = _supabase
           .from('marketplace_products')
           .select('''
-            *,
-            marketplace_product_images(*),
-            profiles!inner(*)
-          ''')
+          *,
+          marketplace_product_images(*),
+          profiles!marketplace_products_user_id_fkey(*)
+        ''')
           .eq('status', 'ACTIVE');
 
       // Apply filters
@@ -189,8 +199,7 @@ class MarketplaceService {
         query = query.ilike('title', '%$searchQuery%');
       }
 
-      // Apply sorting
-      // This is where the type changes from FilterBuilder to TransformBuilder
+      // Apply sorting - this changes the type from FilterBuilder to TransformBuilder
       switch (sortBy) {
         case 'price':
           query = query.order('price', ascending: ascending);
@@ -210,17 +219,32 @@ class MarketplaceService {
           .range(offset, offset + limit - 1)
           .timeout(const Duration(seconds: 10));
 
+      debugPrint('Raw response from Supabase: ${response.length} items');
+
       // Parse response
       final products =
           (response as List)
-              .map((json) => MarketplaceProduct.fromJson(json))
+              .map((json) {
+                try {
+                  return MarketplaceProduct.fromJson(json);
+                } catch (e) {
+                  debugPrint('Error parsing product JSON: $e');
+                  debugPrint('Problematic JSON: $json');
+                  return null;
+                }
+              })
+              .where((product) => product != null)
+              .cast<MarketplaceProduct>()
               .toList();
 
+      debugPrint('Successfully parsed ${products.length} products');
+
       return products;
-    } on TimeoutException {
-      throw Exception('Products request timed out');
+    } on TimeoutException catch (e) {
+      debugPrint('Timeout loading products: $e');
+      return [];
     } catch (e) {
-      debugPrint('Error getting products: $e');
+      debugPrint('Error loading products: $e');
       return [];
     }
   }

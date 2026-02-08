@@ -77,9 +77,9 @@ class EarnMembershipView extends StatelessWidget {
                 children: [
                   Text("Membership Fee", style: theme.textTheme.bodyMedium),
                   const SizedBox(height: 8),
-                  Text(
+                  const Text(
                     "₦1,000",
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 32,
                       fontWeight: FontWeight.bold,
                       color: Colors.green,

@@ -1,8 +1,10 @@
 // worker_task_list_view.dart
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:juvapay/services/supabase_auth_service.dart';
 import 'package:juvapay/services/task_service.dart';
 import 'task_execution_view.dart';
+import 'dart:async';
 
 class WorkerTaskListView extends StatefulWidget {
   const WorkerTaskListView({super.key});
@@ -12,6 +14,7 @@ class WorkerTaskListView extends StatefulWidget {
 }
 
 class _WorkerTaskListViewState extends State<WorkerTaskListView> {
+  final SupabaseClient _supabase = Supabase.instance.client;
   final SupabaseAuthService _authService = SupabaseAuthService();
   final TaskService _taskService = TaskService();
   List<Map<String, dynamic>> _availableTasks = [];
@@ -53,20 +56,35 @@ class _WorkerTaskListViewState extends State<WorkerTaskListView> {
     setState(() => _isLoading = true);
 
     try {
+      debugPrint('Attempting to claim task with queueId: $queueId');
+
       final result = await _authService.claimTask(queueId);
 
-      if (result['success'] == true) {
-        // Navigate to task execution screen
-        final task = _availableTasks.firstWhere(
-          (t) => t['queue_id'] == queueId,
-        );
+      debugPrint('Claim task result: $result');
 
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => TaskExecutionScreen(taskData: task),
-          ),
-        );
+      if (result['success'] == true) {
+        // Get the assignment_id from the result
+        final assignmentId = result['assignment_id'];
+
+        // Get the full task details with the assignment
+        final assignedTask = await _fetchAssignedTask(assignmentId);
+
+        if (assignedTask != null) {
+          // Navigate to task execution screen with complete task data
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => TaskExecutionScreen(taskData: assignedTask),
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Failed to load task details'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -75,7 +93,10 @@ class _WorkerTaskListViewState extends State<WorkerTaskListView> {
           ),
         );
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
+      debugPrint('Error claiming task: $e');
+      debugPrint('Stack trace: $stackTrace');
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error claiming task: ${e.toString()}'),
@@ -89,6 +110,127 @@ class _WorkerTaskListViewState extends State<WorkerTaskListView> {
       }
     }
   }
+
+  Future<Map<String, dynamic>?> _fetchAssignedTask(String assignmentId) async {
+    try {
+      final user = _supabase.auth.currentUser;
+      if (user == null) return null;
+
+      debugPrint('Fetching assigned task for assignmentId: $assignmentId');
+
+      // Query to get the assigned task with all details
+      final response =
+          await _supabase
+              .from('task_assignments')
+              .select('''
+            *,
+            task_queue:queue_id (
+              *,
+              task_catalog:task_catalog_id (*)
+            )
+          ''')
+              .eq('id', assignmentId)
+              .eq('worker_id', user.id)
+              .single();
+
+      debugPrint('Assigned task response: $response');
+
+      if (response != null) {
+        // Merge assignment and queue data
+        final queueData = response['task_queue'] as Map<String, dynamic>? ?? {};
+        final catalogData =
+            queueData['task_catalog'] as Map<String, dynamic>? ?? {};
+
+        return {
+          'assignment_id': assignmentId,
+          'queue_id': response['queue_id'],
+          'platform': queueData['platform']?.toString() ?? 'social',
+          'payout_amount':
+              (queueData['payout_amount'] as num?)?.toDouble() ?? 0.0,
+          'task_title':
+              catalogData['title']?.toString() ??
+              queueData['task_title']?.toString() ??
+              'Social Media Task',
+          'task_description':
+              catalogData['description']?.toString() ??
+              queueData['task_description']?.toString() ??
+              'Complete the social media task',
+          'target_link': queueData['target_link']?.toString(),
+          'target_username': queueData['target_username']?.toString(),
+          'ad_content': queueData['ad_content']?.toString(),
+          'instructions': catalogData['instructions'] ?? [],
+          'requirements': catalogData['requirements'] ?? [],
+          'expires_at':
+              response['expires_at']?.toString() ??
+              queueData['expires_at']?.toString(),
+          'estimated_time': catalogData['estimated_time'] as int? ?? 1440,
+          'status': response['status']?.toString() ?? 'claimed',
+        };
+      }
+      return null;
+    } catch (e) {
+      debugPrint('Error fetching assigned task: $e');
+      return null;
+    }
+  }
+
+  // Alternative simpler _claimTask method if the above is too complex:
+  /*
+  Future<void> _claimTask(String queueId) async {
+    setState(() => _isLoading = true);
+
+    try {
+      debugPrint('Attempting to claim task with queueId: $queueId');
+
+      final result = await _authService.claimTask(queueId);
+
+      debugPrint('Claim task result: $result');
+
+      if (result['success'] == true) {
+        // Get the original task data
+        final task = _availableTasks.firstWhere(
+          (t) => t['queue_id'] == queueId,
+        );
+
+        // Merge with assignment data from result
+        final taskData = {
+          ...task,
+          'assignment_id': result['assignment_id'],
+          'status': 'claimed',
+        };
+
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => TaskExecutionScreen(taskData: taskData),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result['message'] ?? 'Failed to claim task'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e, stackTrace) {
+      debugPrint('Error claiming task: $e');
+      debugPrint('Stack trace: $stackTrace');
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error claiming task: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        await _loadAvailableTasks(); // Refresh list
+      }
+    }
+  }
+  */
 
   @override
   Widget build(BuildContext context) {

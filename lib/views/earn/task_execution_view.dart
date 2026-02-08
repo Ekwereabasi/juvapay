@@ -24,30 +24,51 @@ class _TaskExecutionScreenState extends State<TaskExecutionScreen> {
   String? _assignmentId;
   String? _queueId;
 
-  @override
-  void initState() {
-    super.initState();
-    _initializeTaskData();
-    _initializeTimer();
+@override
+void initState() {
+  super.initState();
+  _initializeTaskData();
+  _initializeTimer();
+  
+  // Debug print to see what data we have
+  debugPrint('Task data keys: ${widget.taskData.keys.toList()}');
+  debugPrint('Assignment ID: ${widget.taskData['assignment_id']}');
+  debugPrint('Queue ID: ${widget.taskData['queue_id']}');
+}
+
+void _initializeTaskData() {
+  // Extract data from task structure
+  _assignmentId = widget.taskData['assignment_id']?.toString();
+  _queueId = widget.taskData['queue_id']?.toString();
+
+  // If assignment_id is not in the main map, check nested structures
+  if (_assignmentId == null) {
+    // Check if assignment_id is in a nested result field
+    if (widget.taskData.containsKey('result') && 
+        widget.taskData['result'] is Map) {
+      _assignmentId = widget.taskData['result']['assignment_id']?.toString();
+    }
   }
 
-  void _initializeTaskData() {
-    // Extract data from new task structure
-    _assignmentId = widget.taskData['assignment_id']?.toString();
-    _queueId = widget.taskData['queue_id']?.toString();
+  debugPrint('Final Assignment ID: $_assignmentId');
+  debugPrint('Final Queue ID: $_queueId');
 
-    // Set time based on task requirements
-    if (widget.taskData.containsKey('expires_at')) {
-      final expiresAt = DateTime.parse(widget.taskData['expires_at']);
+  // Set time based on task requirements
+  if (widget.taskData.containsKey('expires_at')) {
+    try {
+      final expiresAt = DateTime.parse(widget.taskData['expires_at'].toString());
       final now = DateTime.now();
       if (expiresAt.isAfter(now)) {
         _timeLeft = expiresAt.difference(now);
       }
-    } else if (widget.taskData.containsKey('estimated_time')) {
-      final minutes = widget.taskData['estimated_time'] as int? ?? 1440;
-      _timeLeft = Duration(minutes: minutes);
+    } catch (e) {
+      debugPrint('Error parsing expires_at: $e');
     }
+  } else if (widget.taskData.containsKey('estimated_time')) {
+    final minutes = widget.taskData['estimated_time'] as int? ?? 1440;
+    _timeLeft = Duration(minutes: minutes);
   }
+}
 
   void _initializeTimer() {
     _startTimer();

@@ -448,30 +448,52 @@ class TaskService {
   }
 
   /// Submit task proof (for workers)
-  Future<Map<String, dynamic>> submitTaskProof({
-    required String assignmentId,
-    required String proofScreenshotUrl,
-    required String proofPlatformUsername,
-    String? proofDescription,
-  }) async {
-    try {
-      final response = await _supabase.rpc(
-        'submit_task_proof',
-        params: {
-          'p_assignment_id': assignmentId,
-          'p_proof_screenshot_url': proofScreenshotUrl,
-          'p_proof_platform_username': proofPlatformUsername,
-          'p_proof_description': proofDescription,
-        },
+/// TaskService - Update the submitTaskProof method
+Future<Map<String, dynamic>> submitTaskProof({
+  required String assignmentId,
+  required String platformUsername,
+  required File proofImage,
+  String? proofDescription,
+}) async {
+  try {
+    final user = _supabase.auth.currentUser;
+    if (user == null) {
+      return {'success': false, 'message': 'User not authenticated'};
+    }
+
+    // Upload image to storage first
+    final fileName = '${assignmentId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+    final storagePath = 'task_proofs/${user.id}/$fileName';
+    
+    await _supabase.storage
+      .from('task_proofs')
+      .upload(
+        storagePath,
+        proofImage,
+        fileOptions: const FileOptions(upsert: true),
       );
 
-      return {'success': true, 'message': response['message']};
-    } catch (e) {
-      debugPrint('Error submitting task proof: $e');
-      return {'success': false, 'message': getErrorMessage(e)};
-    }
-  }
+    final proofImageUrl = _supabase.storage
+      .from('task_proofs')
+      .getPublicUrl(storagePath);
 
+    // Now call the RPC function
+    final response = await _supabase.rpc(
+      'submit_task_proof',
+      params: {
+        'p_assignment_id': assignmentId,
+        'p_proof_screenshot_url': proofImageUrl,
+        'p_proof_platform_username': platformUsername,
+        'p_proof_description': proofDescription,
+      },
+    );
+
+    return {'success': true, 'message': response['message']};
+  } catch (e) {
+    debugPrint('Error submitting task proof: $e');
+    return {'success': false, 'message': getErrorMessage(e)};
+  }
+}
   /// Get worker statistics
   Future<Map<String, dynamic>> getWorkerStatistics() async {
     try {

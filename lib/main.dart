@@ -1,3 +1,4 @@
+// main.dart - COMPLETE FIXED VERSION
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -24,6 +25,9 @@ import 'view_models/home_view_model.dart';
 import 'views/onboarding/onboarding_view.dart';
 import 'views/auth/reset_password_page.dart';
 import 'widgets/app_bottom_navbar.dart';
+
+// Error Boundary
+import 'widgets/error_boundary.dart';
 
 Future<void> main() async {
   // Ensure Flutter binding is initialized
@@ -639,12 +643,11 @@ class _JuvaPayAppState extends State<JuvaPayApp> with WidgetsBindingObserver {
                       ),
                 );
               },
-              home:
-                  isLoggedIn
-                      ? const AppBottomNavigationBar()
-                      : const OnboardingView(),
+              home: isLoggedIn
+                  ? HomeScreenWithErrorBoundary()
+                  : const OnboardingView(),
               routes: {
-                '/home': (context) => const AppBottomNavigationBar(),
+                '/home': (context) => HomeScreenWithErrorBoundary(),
                 '/onboarding': (context) => const OnboardingView(),
                 '/reset-password': (context) {
                   final args =
@@ -660,6 +663,129 @@ class _JuvaPayAppState extends State<JuvaPayApp> with WidgetsBindingObserver {
           },
         ),
       ),
+    );
+  }
+}
+
+// Widget that wraps home screen with error boundary
+class HomeScreenWithErrorBoundary extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return ErrorBoundary(
+      child: const AppBottomNavigationBar(),
+      onError: (error, stackTrace) {
+        debugPrint('❌ Home screen error: $error');
+        debugPrint('Stack trace: $stackTrace');
+        
+        // Try to get the HomeViewModel to refresh
+        try {
+          final homeViewModel = context.read<HomeViewModel>();
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            homeViewModel.refreshAll(force: true);
+          });
+        } catch (e) {
+          debugPrint('Error accessing HomeViewModel: $e');
+        }
+        
+        // Return error screen
+        return Scaffold(
+          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+          appBar: AppBar(
+            title: const Text('JuvaPay'),
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+          ),
+          body: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.error_outline, size: 64, color: Colors.red),
+                const SizedBox(height: 20),
+                const Text(
+                  'Oops! Something went wrong',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 40),
+                  child: Text(
+                    'We encountered an issue loading the home screen.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Theme.of(context).hintColor,
+                      fontSize: 16,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 30),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    ElevatedButton(
+                      onPressed: () {
+                        // Try to refresh the home view model
+                        try {
+                          final homeViewModel = context.read<HomeViewModel>();
+                          homeViewModel.refreshAll(force: true);
+                        } catch (e) {
+                          debugPrint('Error refreshing: $e');
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Theme.of(context).primaryColor,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 24,
+                          vertical: 12,
+                        ),
+                      ),
+                      child: const Text(
+                        'Retry',
+                        style: TextStyle(color: Colors.white),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    OutlinedButton(
+                      onPressed: () {
+                        // Navigate to onboarding
+                        Navigator.of(context).pushReplacement(
+                          MaterialPageRoute(
+                            builder: (context) => const OnboardingView(),
+                          ),
+                        );
+                      },
+                      child: const Text('Sign Out'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                TextButton(
+                  onPressed: () {
+                    // Clear cache and retry
+                    try {
+                      final homeViewModel = context.read<HomeViewModel>();
+                      homeViewModel.clearCache();
+                      homeViewModel.refreshAll(force: true);
+                    } catch (e) {
+                      debugPrint('Error clearing cache: $e');
+                    }
+                  },
+                  child: Text(
+                    'Clear Cache & Retry',
+                    style: TextStyle(
+                      color: Theme.of(context).primaryColor,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }

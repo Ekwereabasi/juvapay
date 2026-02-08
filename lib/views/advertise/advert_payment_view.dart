@@ -3,8 +3,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:juvapay/services/supabase_auth_service.dart';
 import 'package:juvapay/services/wallet_service.dart';
 import 'package:lottie/lottie.dart';
-import 'package:juvapay/views/market/marketplace_upload_page.dart';
 import 'dart:async';
+import 'package:juvapay/views/market/marketplace_upload_page.dart';
+import 'package:juvapay/views/settings/subpages/fund_wallet_view.dart';
 
 class AdvertPaymentView extends StatefulWidget {
   const AdvertPaymentView({super.key});
@@ -23,7 +24,6 @@ class _AdvertPaymentViewState extends State<AdvertPaymentView> {
 
   double _walletBalance = 0.0;
   double _availableBalance = 0.0;
-  Wallet? _wallet;
   StreamSubscription? _walletStreamSubscription;
 
   @override
@@ -66,8 +66,9 @@ class _AdvertPaymentViewState extends State<AdvertPaymentView> {
       final subscription = await _walletService.checkAdvertSubscription();
       _hasActiveSubscription = subscription['is_active'] == true;
 
-      if (_hasActiveSubscription) {
-        _navigateToUpload();
+      // If user already has active subscription, don't show this page
+      if (_hasActiveSubscription && mounted) {
+        _navigateToMarketplaceUpload();
       }
     } catch (e) {
       debugPrint('Error checking subscription: $e');
@@ -82,26 +83,47 @@ class _AdvertPaymentViewState extends State<AdvertPaymentView> {
     setState(() => _isProcessing = true);
 
     try {
-      // First check balance using the new system
+      // First check balance
       final balanceCheck = await _walletService.checkBalance(1000.0);
 
       if (balanceCheck['hasSufficientBalance'] == true) {
+        // Show confirmation dialog similar to membership page
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Confirm Advert Payment'),
+            content: const Text(
+              'You will be charged ₦1000 for 1 month advert subscription. Do you want to proceed?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Confirm'),
+              ),
+            ],
+          ),
+        );
+
+        if (confirmed != true) {
+          setState(() => _isProcessing = false);
+          return;
+        }
+
         // Process advert payment
         final result = await _walletService.processAdvertPayment();
 
         if (result['success'] == true) {
+          // Show success animation and navigate
           await _showSuccessAnimation();
-
-          // Navigate back to upload page with success
-          Navigator.of(context).pop(true);
-
-          // Show success message
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Advert subscription activated successfully!'),
-              backgroundColor: Colors.green,
-            ),
-          );
+          
+          // Navigate to MarketplaceUploadPage after successful payment
+          if (mounted) {
+            _navigateToMarketplaceUpload();
+          }
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -134,6 +156,14 @@ class _AdvertPaymentViewState extends State<AdvertPaymentView> {
     }
   }
 
+  void _navigateToMarketplaceUpload() {
+    // Use push instead of pushReplacement to avoid context issues
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const MarketplaceUploadPage()),
+    );
+  }
+
   void _showInsufficientFundsDialog({
     required double currentBalance,
     required double availableBalance,
@@ -142,64 +172,58 @@ class _AdvertPaymentViewState extends State<AdvertPaymentView> {
   }) {
     showDialog(
       context: context,
-      builder:
-          (context) => AlertDialog(
-            title: const Text('Insufficient Balance'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (isWalletLocked)
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: Colors.orange.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.orange),
-                    ),
-                    child: const Row(
-                      children: [
-                        Icon(Icons.warning, color: Colors.orange),
-                        SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Your wallet is currently locked. Please contact support.',
-                            style: TextStyle(color: Colors.orange),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                if (isWalletLocked) const SizedBox(height: 10),
-                const Text('You need ₦1,000 to activate advert subscription.'),
-                const SizedBox(height: 10),
-                Text('Current Balance: ₦${currentBalance.toStringAsFixed(2)}'),
-                Text(
-                  'Available Balance: ₦${availableBalance.toStringAsFixed(2)}',
+      builder: (context) => AlertDialog(
+        title: const Text('Insufficient Balance'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (isWalletLocked)
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.orange),
                 ),
-                if (_wallet?.lockedBalance != null &&
-                    _wallet!.lockedBalance > 0)
-                  Text(
-                    'Locked Balance: ₦${_wallet!.lockedBalance.toStringAsFixed(2)}',
-                  ),
-                Text('Required: ₦1,000.00'),
-                Text('Deficit: ₦${deficit.toStringAsFixed(2)}'),
-              ],
+                child: const Row(
+                  children: [
+                    Icon(Icons.warning, color: Colors.orange),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Your wallet is currently locked. Please contact support.',
+                        style: TextStyle(color: Colors.orange),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            if (isWalletLocked) const SizedBox(height: 10),
+            const Text('You need ₦1,000 to activate advert subscription.'),
+            const SizedBox(height: 10),
+            Text('Current Balance: ₦${currentBalance.toStringAsFixed(2)}'),
+            Text(
+              'Available Balance: ₦${availableBalance.toStringAsFixed(2)}',
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('CANCEL'),
-              ),
-              ElevatedButton(
-                onPressed: () {
-                  Navigator.pop(context);
-                  Navigator.pushNamed(context, '/fund-wallet');
-                },
-                child: const Text('FUND WALLET'),
-              ),
-            ],
+            Text('Required: ₦1,000.00'),
+            Text('Deficit: ₦${deficit.toStringAsFixed(2)}'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('CANCEL'),
           ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _navigateToFundWallet(context);
+            },
+            child: const Text('FUND WALLET'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -208,9 +232,6 @@ class _AdvertPaymentViewState extends State<AdvertPaymentView> {
       context: context,
       barrierDismissible: false,
       builder: (context) {
-        Future.delayed(const Duration(seconds: 2), () {
-          Navigator.pop(context);
-        });
         return Dialog(
           backgroundColor: Colors.transparent,
           elevation: 0,
@@ -234,7 +255,7 @@ class _AdvertPaymentViewState extends State<AdvertPaymentView> {
               ),
               const SizedBox(height: 10),
               const Text(
-                'Advert access activated',
+                'Redirecting to product upload...',
                 style: TextStyle(color: Colors.white70),
               ),
             ],
@@ -244,8 +265,11 @@ class _AdvertPaymentViewState extends State<AdvertPaymentView> {
     );
   }
 
-  void _navigateToUpload() {
-    Navigator.of(context).pop(true);
+  void _navigateToFundWallet(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const FundWalletScreen()),
+    );
   }
 
   @override
@@ -259,14 +283,23 @@ class _AdvertPaymentViewState extends State<AdvertPaymentView> {
       );
     }
 
+    // If user already has active subscription, navigate directly
+    if (_hasActiveSubscription) {
+      // This will be caught by initState and redirected
+      return Scaffold(
+        backgroundColor: theme.scaffoldBackgroundColor,
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
         title: Text(
           "Advertise With Us",
-          style: Theme.of(
-            context,
-          ).appBarTheme.titleTextStyle?.copyWith(fontWeight: FontWeight.bold),
+          style: Theme.of(context).appBarTheme.titleTextStyle?.copyWith(
+            fontWeight: FontWeight.bold,
+          ),
         ),
         backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
         elevation: Theme.of(context).appBarTheme.elevation ?? 0,
@@ -291,16 +324,15 @@ class _AdvertPaymentViewState extends State<AdvertPaymentView> {
                       height: 180,
                       width: double.infinity,
                       fit: BoxFit.cover,
-                      errorBuilder:
-                          (c, e, s) => Container(
-                            height: 180,
-                            color: theme.cardColor,
-                            child: Icon(
-                              Icons.image,
-                              size: 50,
-                              color: theme.disabledColor,
-                            ),
-                          ),
+                      errorBuilder: (c, e, s) => Container(
+                        height: 180,
+                        color: theme.cardColor,
+                        child: Icon(
+                          Icons.image,
+                          size: 50,
+                          color: theme.disabledColor,
+                        ),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 25),
@@ -454,10 +486,9 @@ class _AdvertPaymentViewState extends State<AdvertPaymentView> {
                                   style: TextStyle(
                                     fontSize: 16,
                                     fontWeight: FontWeight.w600,
-                                    color:
-                                        _availableBalance >= 1000
-                                            ? Colors.green
-                                            : Colors.orange,
+                                    color: _availableBalance >= 1000
+                                        ? Colors.green
+                                        : Colors.orange,
                                   ),
                                 ),
                               ],
@@ -497,7 +528,7 @@ class _AdvertPaymentViewState extends State<AdvertPaymentView> {
                           width: double.infinity,
                           child: ElevatedButton(
                             onPressed: () {
-                              Navigator.pushNamed(context, '/fund-wallet');
+                              _navigateToFundWallet(context);
                             },
                             style: ElevatedButton.styleFrom(
                               backgroundColor: theme.primaryColor,
@@ -585,42 +616,38 @@ class _AdvertPaymentViewState extends State<AdvertPaymentView> {
                       ],
                     ),
                     ElevatedButton(
-                      onPressed:
-                          _isProcessing
-                              ? null
-                              : () async {
-                                final balanceCheck = await _walletService
-                                    .checkBalance(1000.0);
-                                if (balanceCheck['isWalletLocked'] == true) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text(
-                                        'Your wallet is locked. Please contact support.',
-                                      ),
-                                      backgroundColor: Colors.red,
+                      onPressed: _isProcessing
+                          ? null
+                          : () async {
+                              final balanceCheck = await _walletService
+                                  .checkBalance(1000.0);
+                              if (balanceCheck['isWalletLocked'] == true) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'Your wallet is locked. Please contact support.',
                                     ),
-                                  );
-                                } else if (balanceCheck['hasSufficientBalance'] ==
-                                    true) {
-                                  _processPayment();
-                                } else {
-                                  _showInsufficientFundsDialog(
-                                    currentBalance:
-                                        balanceCheck['currentBalance']
-                                            as double,
-                                    availableBalance:
-                                        balanceCheck['availableBalance']
-                                            as double,
-                                    deficit: balanceCheck['deficit'] as double,
-                                    isWalletLocked: false,
-                                  );
-                                }
-                              },
+                                    backgroundColor: Colors.red,
+                                  ),
+                                );
+                              } else if (balanceCheck['hasSufficientBalance'] ==
+                                  true) {
+                                _processPayment();
+                              } else {
+                                _showInsufficientFundsDialog(
+                                  currentBalance:
+                                      balanceCheck['currentBalance'] as double,
+                                  availableBalance: balanceCheck[
+                                      'availableBalance'] as double,
+                                  deficit: balanceCheck['deficit'] as double,
+                                  isWalletLocked: false,
+                                );
+                              }
+                            },
                       style: ElevatedButton.styleFrom(
-                        backgroundColor:
-                            _availableBalance >= 1000
-                                ? theme.primaryColor
-                                : Colors.grey,
+                        backgroundColor: _availableBalance >= 1000
+                            ? theme.primaryColor
+                            : Colors.grey,
                         padding: const EdgeInsets.symmetric(
                           horizontal: 30,
                           vertical: 15,
@@ -629,32 +656,31 @@ class _AdvertPaymentViewState extends State<AdvertPaymentView> {
                           borderRadius: BorderRadius.circular(5),
                         ),
                       ),
-                      child:
-                          _isProcessing
-                              ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                              : Text(
-                                _availableBalance >= 1000
-                                    ? "PAY & CONTINUE"
-                                    : "INSUFFICIENT BALANCE",
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                ),
+                      child: _isProcessing
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
                               ),
+                            )
+                          : Text(
+                              _availableBalance >= 1000
+                                  ? "PAY & CONTINUE"
+                                  : "INSUFFICIENT BALANCE",
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 8),
                 TextButton(
                   onPressed: () {
-                    Navigator.of(context).pop(false);
+                    Navigator.of(context).pop();
                   },
                   child: const Text(
                     'CANCEL',

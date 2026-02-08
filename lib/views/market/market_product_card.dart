@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:juvapay/models/marketplace_models.dart';
 
 class MarketProductCard extends StatelessWidget {
-  final Map<String, dynamic> product;
+  final MarketplaceProduct product;
   final VoidCallback onTap;
 
   const MarketProductCard({
@@ -19,21 +20,18 @@ class MarketProductCard extends StatelessWidget {
       decimalDigits: 0,
     );
 
-    // Data extraction
-    final double price = (product['price'] as num).toDouble();
-    final double? oldPrice =
-        product['old_price'] != null
-            ? (product['old_price'] as num).toDouble()
-            : null;
-    final String title = product['title'] ?? 'No Title';
-    final int likes = product['likes_count'] ?? 0;
-    final int views = product['views_count'] ?? 0;
+    // Data extraction from MarketplaceProduct
+    final double price = product.price;
+    final double? oldPrice = product.oldPrice;
+    final String title = product.title;
+    final int likes = product.likesCount;
+    final int views = product.viewsCount;
 
     // Get first image or placeholder
-    final List images = product['marketplace_product_images'] ?? [];
+    final List<ProductImage> images = product.images;
     final String imageUrl =
         images.isNotEmpty
-            ? images[0]['image_url']
+            ? images[0].imageUrl
             : 'https://via.placeholder.com/150';
 
     // Calculate Discount %
@@ -65,6 +63,18 @@ class MarketProductCard extends StatelessWidget {
                   imageUrl,
                   width: double.infinity,
                   fit: BoxFit.cover,
+                  loadingBuilder: (context, child, loadingProgress) {
+                    if (loadingProgress == null) return child;
+                    return Center(
+                      child: CircularProgressIndicator(
+                        value:
+                            loadingProgress.expectedTotalBytes != null
+                                ? loadingProgress.cumulativeBytesLoaded /
+                                    loadingProgress.expectedTotalBytes!
+                                : null,
+                      ),
+                    );
+                  },
                   errorBuilder:
                       (c, e, s) => Container(
                         color: theme.canvasColor,
@@ -103,7 +113,7 @@ class MarketProductCard extends StatelessWidget {
                         ),
                         const SizedBox(width: 4),
                         Text(
-                          product['main_category'] ?? 'Item',
+                          product.mainCategory,
                           style: TextStyle(
                             fontSize: 10,
                             color: theme.primaryColor.withOpacity(0.8),

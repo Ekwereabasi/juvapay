@@ -23,7 +23,7 @@ class MarketplaceProduct {
   final int viewsCount;
   final int likesCount;
   final List<ProductImage> images;
-  final ProductSeller? seller;
+  final Profile seller; // Changed from ProductSeller? to Profile
   final bool isActive;
 
   MarketplaceProduct({
@@ -48,7 +48,7 @@ class MarketplaceProduct {
     required this.viewsCount,
     required this.likesCount,
     required this.images,
-    this.seller,
+    required this.seller, // Changed to required
   }) : isActive = status == 'ACTIVE';
 
   factory MarketplaceProduct.fromJson(Map<String, dynamic> json) {
@@ -60,10 +60,20 @@ class MarketplaceProduct {
             .cast<ProductImage>()
             .toList();
 
-    // Parse seller if available
-    ProductSeller? seller;
+    // Parse seller if available - assuming 'profiles' key exists
+    Profile seller;
     if (json['profiles'] != null) {
-      seller = ProductSeller.fromJson(json['profiles']);
+      seller = Profile.fromJson(json['profiles']);
+    } else {
+      // Create a default seller profile if not found
+      seller = Profile(
+        id: json['user_id'] as String? ?? '',
+        fullName: 'Anonymous Seller',
+        phoneNumber: null,
+        email: null,
+        avatarUrl: null,
+        username: null,
+      );
     }
 
     return MarketplaceProduct(
@@ -115,7 +125,7 @@ class MarketplaceProduct {
       'views_count': viewsCount,
       'likes_count': likesCount,
       'marketplace_product_images': images.map((img) => img.toJson()).toList(),
-      if (seller != null) 'profiles': seller!.toJson(),
+      'profiles': seller.toJson(),
     };
   }
 
@@ -166,6 +176,48 @@ class ProductImage {
   }
 }
 
+// Changed from ProductSeller to Profile to match your existing code
+class Profile {
+  final String id;
+  final String fullName;
+  final String? phoneNumber;
+  final String? email;
+  final String? avatarUrl;
+  final String? username;
+
+  Profile({
+    required this.id,
+    required this.fullName,
+    this.phoneNumber,
+    this.email,
+    this.avatarUrl,
+    this.username,
+  });
+
+  factory Profile.fromJson(Map<String, dynamic> json) {
+    return Profile(
+      id: json['id'] as String,
+      fullName: json['full_name'] as String? ?? 'Anonymous Seller',
+      phoneNumber: json['phone_number'] as String?,
+      email: json['email'] as String?,
+      avatarUrl: json['avatar_url'] as String?,
+      username: json['username'] as String?,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'full_name': fullName,
+      'phone_number': phoneNumber,
+      'email': email,
+      'avatar_url': avatarUrl,
+      'username': username,
+    };
+  }
+}
+
+// Keep ProductSeller as alias for backward compatibility if needed
 class ProductSeller {
   final String id;
   final String fullName;

@@ -452,61 +452,72 @@ class WalletService {
     }
   }
 
-  Future<Map<String, dynamic>> checkBalance(double requiredAmount) async {
+Future<Map<String, dynamic>> checkBalance(double requiredAmount) async {
     final user = _supabase.auth.currentUser;
     if (user == null) throw Exception('User not authenticated');
 
     try {
       final result = await _supabase
-          .rpc('check_wallet_balance', params: {
-            'p_user_id': user.id,
-            'p_required_amount': requiredAmount,
-          })
+          .rpc(
+            'check_wallet_balance',
+            params: {'p_user_id': user.id, 'p_required_amount': requiredAmount},
+          )
           .single()
           .timeout(const Duration(seconds: 10));
 
       return {
-        'success': result['success'] ?? false,
-        'hasSufficientBalance': result['has_sufficient_balance'] ?? false,
-        'isWalletLocked': result['is_wallet_locked'] ?? false,
-        'currentBalance': (result['current_balance'] as num?)?.toDouble() ?? 0.0,
-        'availableBalance': (result['available_balance'] as num?)?.toDouble() ?? 0.0,
+        'success': true,
+        'hasSufficientBalance': result['has_sufficient_balance'] == true,
+        'isWalletLocked': result['is_wallet_locked'] == true,
+        'currentBalance': (result['current_balance'] as num).toDouble(),
+        'availableBalance': (result['available_balance'] as num).toDouble(),
         'requiredAmount': requiredAmount,
-        'deficit': (result['deficit'] as num?)?.toDouble() ?? 0.0,
+        'deficit': (result['deficit'] as num).toDouble(),
       };
     } on TimeoutException {
       return {
         'success': false,
         'error': 'Request timed out',
+        'hasSufficientBalance': false,
+        'isWalletLocked': false,
+        'currentBalance': 0.0,
+        'availableBalance': 0.0,
+        'deficit': requiredAmount,
       };
     } catch (e) {
+      debugPrint('Error checking balance: $e');
       return {
         'success': false,
         'error': 'Failed to check balance: $e',
+        'hasSufficientBalance': false,
+        'isWalletLocked': false,
+        'currentBalance': 0.0,
+        'availableBalance': 0.0,
+        'deficit': requiredAmount,
       };
     }
   }
-
   // ==========================================
   // 3. ADVERT SUBSCRIPTION METHODS
   // ==========================================
 
   // Check advert subscription status
-  Future<Map<String, dynamic>> checkAdvertSubscription() async {
+Future<Map<String, dynamic>> checkAdvertSubscription() async {
     try {
       final user = _supabase.auth.currentUser;
       if (user == null) throw Exception('User not authenticated');
-      
-      final response = await _supabase
-          .from('active_advert_subscriptions')
-          .select()
-          .eq('user_id', user.id)
-          .maybeSingle();
-      
+
+      final response =
+          await _supabase
+              .from('active_advert_subscriptions')
+              .select()
+              .eq('user_id', user.id)
+              .maybeSingle();
+
       if (response == null) {
         return {'has_subscription': false, 'is_active': false};
       }
-      
+
       return {
         'has_subscription': true,
         'is_active': response['is_active'] == true,
@@ -517,25 +528,13 @@ class WalletService {
       return {'has_subscription': false, 'is_active': false};
     }
   }
-  
   // Process advert payment
-  Future<Map<String, dynamic>> processAdvertPayment() async {
+Future<Map<String, dynamic>> processAdvertPayment() async {
     try {
       final user = _supabase.auth.currentUser;
       if (user == null) throw Exception('User not authenticated');
-      
-      // First check balance
-      final balanceCheck = await checkBalance(1000.0);
-      
-      if (balanceCheck['hasSufficientBalance'] != true) {
-        return {
-          'success': false,
-          'message': 'Insufficient balance',
-          'available_balance': balanceCheck['availableBalance'],
-        };
-      }
-      
-      // Process advert fee payment using the existing processPayment method
+
+      // Process advert fee payment
       final result = await processPayment(
         amount: 1000.0,
         transactionType: 'ADVERT_FEE',
@@ -546,36 +545,41 @@ class WalletService {
           'auto_renew': true,
         },
       );
-      
+
       if (result['success'] == true) {
         // Create advert subscription record
-        await _supabase.from('advert_subscriptions').insert({
-          'user_id': user.id,
-          'start_date': DateTime.now().toIso8601String(),
-          'end_date': DateTime.now().add(Duration(days: 30)).toIso8601String(),
-          'amount_paid': 1000.0,
-          'payment_ref': result['transactionId'],
-        });
-        
+        final subscriptionResult =
+            await _supabase
+                .from('advert_subscriptions')
+                .insert({
+                  'user_id': user.id,
+                  'start_date': DateTime.now().toIso8601String(),
+                  'end_date':
+                      DateTime.now()
+                          .add(const Duration(days: 30))
+                          .toIso8601String(),
+                  'amount_paid': 1000.0,
+                  'payment_ref': result['referenceId'],
+                })
+                .select()
+                .single();
+
         return {
           'success': true,
-          'message': 'Advert subscription activated',
-          'subscription_id': result['transactionId'],
+          'message': 'Advert subscription activated successfully!',
+          'subscription_id': subscriptionResult['id'],
           'current_balance': result['currentBalance'],
           'available_balance': result['availableBalance'],
         };
       }
-      
+
       return {
         'success': false,
         'message': result['message'] ?? 'Payment failed',
       };
     } catch (e) {
       debugPrint('Error processing advert payment: $e');
-      return {
-        'success': false,
-        'message': 'Payment failed: $e',
-      };
+      return {'success': false, 'message': 'Payment failed: $e'};
     }
   }
 

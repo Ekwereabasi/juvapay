@@ -602,37 +602,29 @@ Future<void> clearProfileCache() async {
   }
 
   /// Submit task proof (using the new system)
+/// SupabaseAuthService - Update the submitTaskProof method
   Future<Map<String, dynamic>> submitTaskProof({
     required String assignmentId,
     required String platformUsername,
     required File proofImage,
+    String? proofDescription,
   }) async {
     try {
-      final user = _supabase.auth.currentUser;
-      if (user == null) throw Exception('User not authenticated');
-
-      // 1. Upload proof image using TaskService
-      final timestamp = DateTime.now().millisecondsSinceEpoch;
-      final imagePath = '${user.id}/assignment_${assignmentId}_$timestamp.png';
-
-      final imageUrl = await _taskService.uploadImage(proofImage, imagePath);
-
-      if (imageUrl == null) {
-        throw Exception('Failed to upload proof image');
-      }
-
-      // 2. Submit proof using the new function
       return await _taskService.submitTaskProof(
         assignmentId: assignmentId,
-        proofScreenshotUrl: imageUrl,
-        proofPlatformUsername: platformUsername,
-        proofDescription: 'Proof submitted via app',
+        platformUsername: platformUsername,
+        proofImage: proofImage,
+        proofDescription: proofDescription,
       );
     } catch (e) {
-      return {'success': false, 'message': e.toString()};
+      debugPrint('Error in submitTaskProof: $e');
+      return {
+        'success': false,
+        'message': 'Failed to submit proof: ${e.toString()}',
+      };
     }
   }
-
+  
   /// Get worker statistics
 Future<Map<String, dynamic>> getWorkerStatistics() async {
     try {

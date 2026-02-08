@@ -49,21 +49,27 @@ class _MarketViewState extends State<MarketView> {
   bool _loadingStates = false;
   bool _loadingLgas = false;
 
-  @override
+@override
   void initState() {
     super.initState();
+    debugPrint('MarketView initState called');
     _initializeData();
   }
 
   Future<void> _initializeData() async {
+    debugPrint('Initializing market data...');
     await Future.wait([
       _loadProducts(refresh: true),
       _loadCategories(),
       _loadStates(),
     ]);
+    debugPrint('Market data initialization complete');
+    debugPrint('Products loaded: ${_products.length}');
   }
 
   Future<void> _loadProducts({bool refresh = false}) async {
+    debugPrint('Loading products, refresh: $refresh');
+
     if (!refresh && (!_hasMore || _isLoading)) return;
 
     setState(() {
@@ -78,6 +84,7 @@ class _MarketViewState extends State<MarketView> {
     });
 
     try {
+      debugPrint('Calling marketplace service...');
       final newProducts = await _marketplaceService.getProducts(
         category: _selectedCategory,
         stateId: _selectedStateId,
@@ -89,6 +96,8 @@ class _MarketViewState extends State<MarketView> {
         offset: _currentPage * _pageSize,
       );
 
+      debugPrint('Received ${newProducts.length} products from service');
+
       setState(() {
         _isLoading = false;
         if (refresh) {
@@ -98,17 +107,23 @@ class _MarketViewState extends State<MarketView> {
         }
         _hasMore = newProducts.length == _pageSize;
         _currentPage++;
+
+        // Debug: print all product titles
+        for (var product in _products) {
+          debugPrint(
+            'Product: ${product.title}, Images: ${product.images.length}',
+          );
+        }
       });
     } catch (e) {
       if (!mounted) return;
 
+      debugPrint('Error in _loadProducts: $e');
       setState(() {
         _isLoading = false;
         _hasError = true;
         _errorMessage = 'Failed to load products: ${e.toString()}';
       });
-
-      debugPrint('Error loading products: $e');
     }
   }
 
@@ -518,7 +533,7 @@ class _MarketViewState extends State<MarketView> {
   }
 
   @override
-  Widget build(BuildContext context) {
+Widget build(BuildContext context) {
     return Scaffold(
       key: _scaffoldKey,
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -535,6 +550,10 @@ class _MarketViewState extends State<MarketView> {
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         elevation: 0,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: () => _loadProducts(refresh: true),
+          ),
           IconButton(
             icon: const Icon(Icons.add),
             onPressed: () {

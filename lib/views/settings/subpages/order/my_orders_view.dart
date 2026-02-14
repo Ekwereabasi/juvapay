@@ -96,8 +96,9 @@ class _OrderHistoryViewState extends State<OrderHistoryView> {
   }
 
   void _setupConnectivityListener() {
-    _connectivitySubscription =
-        _connectivity.onConnectivityChanged.listen((ConnectivityResult result) {
+    _connectivitySubscription = _connectivity.onConnectivityChanged.listen((
+      ConnectivityResult result,
+    ) {
       setState(() {
         _isOnline = result != ConnectivityResult.none;
       });
@@ -298,10 +299,10 @@ class _OrderHistoryViewState extends State<OrderHistoryView> {
 
       await file.writeAsString(csvData);
       _showSuccess('Orders exported successfully');
-      
+
       // Copy file path to clipboard for easy access
       await Clipboard.setData(ClipboardData(text: file.path));
-      
+
       setState(() => _isExporting = false);
     } catch (e) {
       if (mounted) {
@@ -325,51 +326,54 @@ class _OrderHistoryViewState extends State<OrderHistoryView> {
     final theme = Theme.of(context);
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: theme.colorScheme.surface,
-        surfaceTintColor: theme.colorScheme.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(
-          'Cancel Order',
-          style: GoogleFonts.inter(
-            fontWeight: FontWeight.w700,
-            color: theme.colorScheme.onSurface,
-          ),
-        ),
-        content: Text(
-          'Are you sure you want to cancel this order?\nThis action cannot be undone.',
-          style: GoogleFonts.inter(
-            fontSize: 14,
-            color: theme.colorScheme.onSurface.withOpacity(0.7),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text(
-              'Cancel',
+      builder:
+          (context) => AlertDialog(
+            backgroundColor: theme.colorScheme.surface,
+            surfaceTintColor: theme.colorScheme.surface,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            title: Text(
+              'Cancel Order',
               style: GoogleFonts.inter(
-                color: theme.colorScheme.onSurface.withOpacity(0.6),
-                fontWeight: FontWeight.w600,
+                fontWeight: FontWeight.w700,
+                color: theme.colorScheme.onSurface,
               ),
             ),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+            content: Text(
+              'Are you sure you want to cancel this order?\nThis action cannot be undone.',
+              style: GoogleFonts.inter(
+                fontSize: 14,
+                color: theme.colorScheme.onSurface.withOpacity(0.7),
               ),
             ),
-            child: Text(
-              'Yes, Cancel',
-              style: GoogleFonts.inter(fontWeight: FontWeight.w600),
-            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: Text(
+                  'Cancel',
+                  style: GoogleFonts.inter(
+                    color: theme.colorScheme.onSurface.withOpacity(0.6),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context, true),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: Text(
+                  'Yes, Cancel',
+                  style: GoogleFonts.inter(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
     );
 
     if (confirm != true) return;
@@ -405,12 +409,13 @@ class _OrderHistoryViewState extends State<OrderHistoryView> {
       context: context,
       firstDate: DateTime(2023),
       lastDate: DateTime.now(),
-      initialDateRange: _startDate != null && _endDate != null
-          ? DateTimeRange(start: _startDate!, end: _endDate!)
-          : DateTimeRange(
-              start: DateTime.now().subtract(const Duration(days: 30)),
-              end: DateTime.now(),
-            ),
+      initialDateRange:
+          _startDate != null && _endDate != null
+              ? DateTimeRange(start: _startDate!, end: _endDate!)
+              : DateTimeRange(
+                start: DateTime.now().subtract(const Duration(days: 30)),
+                end: DateTime.now(),
+              ),
       builder: (context, child) {
         return Theme(
           data: theme.copyWith(
@@ -658,9 +663,7 @@ class _OrderHistoryViewState extends State<OrderHistoryView> {
         color: theme.colorScheme.onSurface.withOpacity(0.5),
       ),
       onDeleted: onRemove,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
     );
   }
 
@@ -668,7 +671,10 @@ class _OrderHistoryViewState extends State<OrderHistoryView> {
     final status = order['status'] as String;
     final createdAt = DateTime.parse(order['created_at'] as String);
     final statusColor = _getStatusColor(status);
-    final platform = order['selected_platform'] as String;
+    final platform =
+        order['platform']?.toString() ??
+        order['selected_platform']?.toString() ??
+        'social';
     final isCancelable = status == 'pending' || status == 'active';
 
     return Container(
@@ -742,7 +748,9 @@ class _OrderHistoryViewState extends State<OrderHistoryView> {
                               Icon(
                                 PlatformHelper.getPlatformIcon(platform),
                                 size: 14,
-                                color: PlatformHelper.getPlatformColor(platform),
+                                color: PlatformHelper.getPlatformColor(
+                                  platform,
+                                ),
                               ),
                               const SizedBox(width: 4),
                               Text(
@@ -817,7 +825,8 @@ class _OrderHistoryViewState extends State<OrderHistoryView> {
                               size: 18,
                               color: Colors.red,
                             ),
-                            onPressed: () => _cancelOrder(order['id'] as String),
+                            onPressed:
+                                () => _cancelOrder(order['id'] as String),
                             tooltip: 'Cancel Order',
                           ),
                         Container(
@@ -833,8 +842,10 @@ class _OrderHistoryViewState extends State<OrderHistoryView> {
                               size: 14,
                               color: theme.colorScheme.primary,
                             ),
-                            onPressed: () =>
-                                _navigateToOrderDetails(order['id'] as String),
+                            onPressed:
+                                () => _navigateToOrderDetails(
+                                  order['id'] as String,
+                                ),
                             padding: EdgeInsets.zero,
                             tooltip: 'View Details',
                           ),
@@ -1175,7 +1186,9 @@ class _OrderHistoryViewState extends State<OrderHistoryView> {
                           IconButton(
                             icon: Icon(
                               Icons.close,
-                              color: theme.colorScheme.onSurface.withOpacity(0.5),
+                              color: theme.colorScheme.onSurface.withOpacity(
+                                0.5,
+                              ),
                             ),
                             onPressed: () => Navigator.pop(context),
                           ),
@@ -1191,7 +1204,13 @@ class _OrderHistoryViewState extends State<OrderHistoryView> {
                           children: [
                             _buildFilterSection(
                               'Status',
-                              ['all', 'pending', 'active', 'completed', 'cancelled'],
+                              [
+                                'all',
+                                'pending',
+                                'active',
+                                'completed',
+                                'cancelled',
+                              ],
                               tempStatus,
                               (value) => setState(() => tempStatus = value!),
                               theme,
@@ -1222,9 +1241,13 @@ class _OrderHistoryViewState extends State<OrderHistoryView> {
                               },
                               style: OutlinedButton.styleFrom(
                                 side: BorderSide(
-                                  color: theme.colorScheme.outline.withOpacity(0.3),
+                                  color: theme.colorScheme.outline.withOpacity(
+                                    0.3,
+                                  ),
                                 ),
-                                padding: const EdgeInsets.symmetric(vertical: 16),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 16,
+                                ),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(12),
                                 ),
@@ -1252,14 +1275,18 @@ class _OrderHistoryViewState extends State<OrderHistoryView> {
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: theme.colorScheme.primary,
                                 foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(vertical: 16),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 16,
+                                ),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(12),
                                 ),
                               ),
                               child: Text(
                                 'Apply Filters',
-                                style: GoogleFonts.inter(fontWeight: FontWeight.w600),
+                                style: GoogleFonts.inter(
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
                             ),
                           ),
@@ -1298,55 +1325,59 @@ class _OrderHistoryViewState extends State<OrderHistoryView> {
         Wrap(
           spacing: 8,
           runSpacing: 8,
-          children: options.map((option) {
-            final isSelected = option == value;
-            final displayText = option == 'all'
-                ? 'All'
-                : PlatformHelper.getPlatformDisplayName(option);
+          children:
+              options.map((option) {
+                final isSelected = option == value;
+                final displayText =
+                    option == 'all'
+                        ? 'All'
+                        : PlatformHelper.getPlatformDisplayName(option);
 
-            return ChoiceChip(
-              label: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (option != 'all')
-                    Icon(
-                      PlatformHelper.getPlatformIcon(option),
-                      size: 14,
-                      color: isSelected
-                          ? Colors.white
-                          : PlatformHelper.getPlatformColor(option),
-                    ),
-                  if (option != 'all') const SizedBox(width: 6),
-                  Text(
-                    displayText,
-                    style: GoogleFonts.inter(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                      color: isSelected
-                          ? Colors.white
-                          : theme.colorScheme.onSurface,
-                    ),
+                return ChoiceChip(
+                  label: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (option != 'all')
+                        Icon(
+                          PlatformHelper.getPlatformIcon(option),
+                          size: 14,
+                          color:
+                              isSelected
+                                  ? Colors.white
+                                  : PlatformHelper.getPlatformColor(option),
+                        ),
+                      if (option != 'all') const SizedBox(width: 6),
+                      Text(
+                        displayText,
+                        style: GoogleFonts.inter(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          color:
+                              isSelected
+                                  ? Colors.white
+                                  : theme.colorScheme.onSurface,
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-              selected: isSelected,
-              onSelected: (selected) {
-                if (selected) onChanged(option);
-              },
-              backgroundColor: theme.colorScheme.surface,
-              selectedColor: theme.colorScheme.primary,
-              side: BorderSide(
-                color: theme.colorScheme.outline.withOpacity(0.3),
-              ),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
-              ),
-              padding: const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 8,
-              ),
-            );
-          }).toList(),
+                  selected: isSelected,
+                  onSelected: (selected) {
+                    if (selected) onChanged(option);
+                  },
+                  backgroundColor: theme.colorScheme.surface,
+                  selectedColor: theme.colorScheme.primary,
+                  side: BorderSide(
+                    color: theme.colorScheme.outline.withOpacity(0.3),
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                );
+              }).toList(),
         ),
       ],
     );
@@ -1440,9 +1471,7 @@ class _OrderHistoryViewState extends State<OrderHistoryView> {
         backgroundColor: Colors.green,
         duration: const Duration(seconds: 3),
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
     );
   }
@@ -1457,15 +1486,15 @@ class _OrderHistoryViewState extends State<OrderHistoryView> {
         backgroundColor: Colors.red,
         duration: const Duration(seconds: 3),
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
     );
   }
 
   void _showOfflineError() {
-    _showError('You are currently offline. Please check your internet connection.');
+    _showError(
+      'You are currently offline. Please check your internet connection.',
+    );
   }
 
   void _showTimeoutError() {
@@ -1536,163 +1565,169 @@ class _OrderHistoryViewState extends State<OrderHistoryView> {
           ),
         ],
       ),
-      body: !_isOnline && _retryLoading
-          ? _buildOfflineState()
-          : Column(
-              children: [
-                // Search Bar
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: TextField(
-                    controller: TextEditingController(text: _searchQuery),
-                    style: GoogleFonts.inter(
-                      color: colorScheme.onSurface,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w500,
-                    ),
-                    decoration: InputDecoration(
-                      hintText: 'Search orders by ID, title, or platform...',
-                      hintStyle: GoogleFonts.inter(
-                        color: colorScheme.onSurface.withOpacity(0.5),
-                        fontWeight: FontWeight.w400,
-                      ),
-                      prefixIcon: Icon(
-                        Icons.search,
-                        color: colorScheme.onSurface.withOpacity(0.5),
-                      ),
-                      suffixIcon: _searchQuery.isNotEmpty
-                          ? IconButton(
-                              icon: Icon(
-                                Icons.clear,
-                                color: colorScheme.onSurface.withOpacity(0.5),
-                              ),
-                              onPressed: () {
-                                setState(() => _searchQuery = '');
-                                _applyFilters();
-                              },
-                            )
-                          : null,
-                      contentPadding: const EdgeInsets.symmetric(
-                        vertical: 16,
-                        horizontal: 16,
-                      ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(
-                          color: colorScheme.outline.withOpacity(0.3),
-                        ),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(
-                          color: colorScheme.outline.withOpacity(0.3),
-                        ),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(
-                          color: colorScheme.primary,
-                          width: 2,
-                        ),
-                      ),
-                      filled: true,
-                      fillColor: colorScheme.surface,
-                    ),
-                    onChanged: (value) {
-                      setState(() => _searchQuery = value);
-                      if (value.isEmpty) _applyFilters();
-                    },
-                    onSubmitted: (_) => _searchOrders(),
-                  ),
-                ),
-
-                // Stats Card
-                _buildStatsCard(theme),
-
-                // Filters Card
-                _buildFiltersCard(theme),
-
-                // Order Count
-                if (!_isLoading && _orders.isNotEmpty)
+      body:
+          !_isOnline && _retryLoading
+              ? _buildOfflineState()
+              : Column(
+                children: [
+                  // Search Bar
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'Showing ${_orders.length} of $_totalOrders orders',
-                          style: GoogleFonts.inter(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                            color: colorScheme.onSurface.withOpacity(0.5),
+                    padding: const EdgeInsets.all(16),
+                    child: TextField(
+                      controller: TextEditingController(text: _searchQuery),
+                      style: GoogleFonts.inter(
+                        color: colorScheme.onSurface,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      decoration: InputDecoration(
+                        hintText: 'Search orders by ID, title, or platform...',
+                        hintStyle: GoogleFonts.inter(
+                          color: colorScheme.onSurface.withOpacity(0.5),
+                          fontWeight: FontWeight.w400,
+                        ),
+                        prefixIcon: Icon(
+                          Icons.search,
+                          color: colorScheme.onSurface.withOpacity(0.5),
+                        ),
+                        suffixIcon:
+                            _searchQuery.isNotEmpty
+                                ? IconButton(
+                                  icon: Icon(
+                                    Icons.clear,
+                                    color: colorScheme.onSurface.withOpacity(
+                                      0.5,
+                                    ),
+                                  ),
+                                  onPressed: () {
+                                    setState(() => _searchQuery = '');
+                                    _applyFilters();
+                                  },
+                                )
+                                : null,
+                        contentPadding: const EdgeInsets.symmetric(
+                          vertical: 16,
+                          horizontal: 16,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: colorScheme.outline.withOpacity(0.3),
                           ),
                         ),
-                        if (_totalOrders > 0)
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: colorScheme.outline.withOpacity(0.3),
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: colorScheme.primary,
+                            width: 2,
+                          ),
+                        ),
+                        filled: true,
+                        fillColor: colorScheme.surface,
+                      ),
+                      onChanged: (value) {
+                        setState(() => _searchQuery = value);
+                        if (value.isEmpty) _applyFilters();
+                      },
+                      onSubmitted: (_) => _searchOrders(),
+                    ),
+                  ),
+
+                  // Stats Card
+                  _buildStatsCard(theme),
+
+                  // Filters Card
+                  _buildFiltersCard(theme),
+
+                  // Order Count
+                  if (!_isLoading && _orders.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
                           Text(
-                            '₦${(_stats['total_spent'] ?? 0).toStringAsFixed(0)} total spent',
+                            'Showing ${_orders.length} of $_totalOrders orders',
                             style: GoogleFonts.inter(
                               fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: colorScheme.primary,
+                              fontWeight: FontWeight.w500,
+                              color: colorScheme.onSurface.withOpacity(0.5),
                             ),
                           ),
-                      ],
+                          if (_totalOrders > 0)
+                            Text(
+                              '₦${(_stats['total_spent'] ?? 0).toStringAsFixed(0)} total spent',
+                              style: GoogleFonts.inter(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: colorScheme.primary,
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
-                  ),
 
-                // Orders List
-                Expanded(
-                  child: _isLoading && _orders.isEmpty
-                      ? _buildLoadingState(theme)
-                      : _retryLoading && _orders.isEmpty
-                          ? _buildErrorState(
+                  // Orders List
+                  Expanded(
+                    child:
+                        _isLoading && _orders.isEmpty
+                            ? _buildLoadingState(theme)
+                            : _retryLoading && _orders.isEmpty
+                            ? _buildErrorState(
                               'Failed to load orders. Please check your connection.',
                               _loadInitialData,
                             )
-                          : _orders.isEmpty
-                              ? _buildEmptyState(theme)
-                              : NotificationListener<ScrollNotification>(
-                                  onNotification: (scrollNotification) {
-                                    if (scrollNotification
-                                            is ScrollEndNotification &&
-                                        scrollNotification.metrics.pixels ==
-                                            scrollNotification
-                                                .metrics.maxScrollExtent &&
-                                        _hasMore) {
-                                      _loadMoreOrders();
+                            : _orders.isEmpty
+                            ? _buildEmptyState(theme)
+                            : NotificationListener<ScrollNotification>(
+                              onNotification: (scrollNotification) {
+                                if (scrollNotification
+                                        is ScrollEndNotification &&
+                                    scrollNotification.metrics.pixels ==
+                                        scrollNotification
+                                            .metrics
+                                            .maxScrollExtent &&
+                                    _hasMore) {
+                                  _loadMoreOrders();
+                                }
+                                return false;
+                              },
+                              child: RefreshIndicator(
+                                color: colorScheme.primary,
+                                onRefresh: _loadInitialData,
+                                child: ListView.builder(
+                                  padding: const EdgeInsets.only(top: 8),
+                                  itemCount:
+                                      _orders.length + (_isLoadingMore ? 1 : 0),
+                                  itemBuilder: (context, index) {
+                                    if (index < _orders.length) {
+                                      return _buildOrderCard(
+                                        _orders[index],
+                                        theme,
+                                      );
+                                    } else {
+                                      return Padding(
+                                        padding: const EdgeInsets.all(16),
+                                        child: Center(
+                                          child: CircularProgressIndicator(
+                                            color: colorScheme.primary,
+                                          ),
+                                        ),
+                                      );
                                     }
-                                    return false;
                                   },
-                                  child: RefreshIndicator(
-                                    color: colorScheme.primary,
-                                    onRefresh: _loadInitialData,
-                                    child: ListView.builder(
-                                      padding: const EdgeInsets.only(top: 8),
-                                      itemCount:
-                                          _orders.length + (_isLoadingMore ? 1 : 0),
-                                      itemBuilder: (context, index) {
-                                        if (index < _orders.length) {
-                                          return _buildOrderCard(
-                                            _orders[index],
-                                            theme,
-                                          );
-                                        } else {
-                                          return Padding(
-                                            padding: const EdgeInsets.all(16),
-                                            child: Center(
-                                              child: CircularProgressIndicator(
-                                                color: colorScheme.primary,
-                                              ),
-                                            ),
-                                          );
-                                        }
-                                      },
-                                    ),
-                                  ),
                                 ),
-                ),
-              ],
-            ),
+                              ),
+                            ),
+                  ),
+                ],
+              ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _clearFilters,
         backgroundColor: colorScheme.primary,
@@ -1702,9 +1737,7 @@ class _OrderHistoryViewState extends State<OrderHistoryView> {
           'Clear Filters',
           style: GoogleFonts.inter(fontWeight: FontWeight.w600),
         ),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
     );
   }

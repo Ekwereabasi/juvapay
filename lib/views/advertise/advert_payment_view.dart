@@ -6,6 +6,7 @@ import 'package:lottie/lottie.dart';
 import 'dart:async';
 import 'package:juvapay/views/market/marketplace_upload_page.dart';
 import 'package:juvapay/views/settings/subpages/fund_wallet_view.dart';
+import 'package:juvapay/utils/transaction_context.dart';
 
 class AdvertPaymentView extends StatefulWidget {
   const AdvertPaymentView({super.key});
@@ -114,7 +115,13 @@ class _AdvertPaymentViewState extends State<AdvertPaymentView> {
         }
 
         // Process advert payment
-        final result = await _walletService.processAdvertPayment();
+        final txContext = await TransactionContext.fetch();
+        final result = await _walletService.processAdvertPayment(
+          ipAddress: txContext.ipAddress,
+          userAgent: txContext.userAgent,
+          deviceId: txContext.deviceId,
+          location: txContext.location,
+        );
 
         if (result['success'] == true) {
           // Show success animation and navigate

@@ -16,14 +16,35 @@ class AppBottomNavigationBar extends StatefulWidget {
 class _AppBottomNavigationBarState extends State<AppBottomNavigationBar> {
   int _selectedIndex = 0;
 
-  // 1. UPDATE: Index 2 is now the Payment View (The Screen), NOT the Dialog.
-  static final List<Widget> _widgetOptions = <Widget>[
-    const HomeView(),
-    const EarnView(),
-    const AdvertPaymentView(), // This is the screen we navigate TO
-    const MarketView(),
-    const MoreView(),
-  ];
+  // Lazily create pages so they don't run initState before a tab is selected.
+  final List<Widget?> _pages = List<Widget?>.filled(5, null);
+
+  Widget _buildPage(int index) {
+    switch (index) {
+      case 0:
+        return const HomeView();
+      case 1:
+        return const EarnView();
+      case 2:
+        return const AdvertPaymentView();
+      case 3:
+        return const MarketView();
+      case 4:
+        return const MoreView();
+      default:
+        return const HomeView();
+    }
+  }
+
+  void _ensurePage(int index) {
+    _pages[index] ??= _buildPage(index);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _ensurePage(_selectedIndex);
+  }
 
   // 2. UPDATE: Intercept the tap for Index 2
   void _onItemTapped(int index) {
@@ -40,6 +61,7 @@ class _AppBottomNavigationBarState extends State<AppBottomNavigationBar> {
                 // THEN switch the tab to show the AdvertPaymentView
                 setState(() {
                   _selectedIndex = 2;
+                  _ensurePage(_selectedIndex);
                 });
               },
             ),
@@ -48,12 +70,18 @@ class _AppBottomNavigationBarState extends State<AppBottomNavigationBar> {
       // Normal navigation for all other tabs
       setState(() {
         _selectedIndex = index;
+        _ensurePage(_selectedIndex);
       });
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    _ensurePage(_selectedIndex);
+    final pages = List<Widget>.generate(
+      5,
+      (index) => _pages[index] ?? const SizedBox.shrink(),
+    );
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
@@ -66,7 +94,7 @@ class _AppBottomNavigationBarState extends State<AppBottomNavigationBar> {
         theme.bottomNavigationBarTheme.unselectedItemColor ?? Colors.grey;
 
     return Scaffold(
-      body: IndexedStack(index: _selectedIndex, children: _widgetOptions),
+      body: IndexedStack(index: _selectedIndex, children: pages),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
           color: navBarColor,

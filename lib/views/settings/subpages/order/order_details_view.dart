@@ -31,6 +31,25 @@ class _OrderDetailsViewState extends State<OrderDetailsView> {
   bool _isSavingMedia = false;
   String _saveStatus = '';
 
+  String _stringValue(dynamic value, {String fallback = 'N/A'}) {
+    if (value == null) return fallback;
+    final v = value.toString().trim();
+    return v.isEmpty ? fallback : v;
+  }
+
+  double _doubleValue(dynamic value, {double fallback = 0}) {
+    if (value is num) return value.toDouble();
+    if (value is String) return double.tryParse(value) ?? fallback;
+    return fallback;
+  }
+
+  DateTime? _dateValue(dynamic value) {
+    if (value == null) return null;
+    if (value is DateTime) return value;
+    if (value is String) return DateTime.tryParse(value);
+    return null;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -43,7 +62,12 @@ class _OrderDetailsViewState extends State<OrderDetailsView> {
 
     try {
       final order = await _orderService.getOrderById(widget.orderId);
-      final activities = await _orderService.getOrderActivity(widget.orderId);
+      List<Map<String, dynamic>> activities = [];
+      try {
+        activities = await _orderService.getOrderActivity(widget.orderId);
+      } catch (_) {
+        activities = [];
+      }
 
       if (mounted) {
         setState(() {
@@ -409,8 +433,15 @@ class _OrderDetailsViewState extends State<OrderDetailsView> {
 
   Widget _buildMediaPreview(ThemeData theme) {
     if (_order == null) return Container();
-    final mediaUrls = _order!['media_urls'] as List<dynamic>? ?? [];
-    final mediaUrl = _order!['media_url'] as String?;
+    final mediaUrlsRaw = _order!['media_urls'];
+    final mediaUrls =
+        mediaUrlsRaw is List
+            ? mediaUrlsRaw
+                .map((e) => e?.toString() ?? '')
+                .where((e) => e.isNotEmpty)
+                .toList()
+            : <String>[];
+    final mediaUrl = _order!['media_url']?.toString();
 
     if (mediaUrls.isEmpty && mediaUrl == null) return Container();
 
@@ -638,8 +669,11 @@ class _OrderDetailsViewState extends State<OrderDetailsView> {
         ),
         const SizedBox(height: 16),
         ..._activities.map((activity) {
-          final description = activity['description'] as String? ?? 'Activity';
-          final createdAt = DateTime.parse(activity['created_at'] as String);
+          final description = _stringValue(
+            activity['description'],
+            fallback: 'Activity',
+          );
+          final createdAt = _dateValue(activity['created_at']);
 
           return ListTile(
             contentPadding: EdgeInsets.zero,
@@ -649,7 +683,9 @@ class _OrderDetailsViewState extends State<OrderDetailsView> {
             ),
             title: Text(description, style: theme.textTheme.bodyMedium),
             subtitle: Text(
-              _dateFormatter.format(createdAt),
+              createdAt != null
+                  ? _dateFormatter.format(createdAt)
+                  : 'Unknown date',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.hintColor,
               ),
@@ -712,35 +748,33 @@ class _OrderDetailsViewState extends State<OrderDetailsView> {
                 _buildInfoRowWidget(
                   context,
                   'Transaction ID',
-                  transaction['id'] as String? ?? 'N/A',
+                  _stringValue(transaction['id']),
                 ),
                 _buildInfoRowWidget(
                   context,
                   'Amount',
-                  '₦${(transaction['amount'] as num?)?.toStringAsFixed(2) ?? '0.00'}',
+                  '₦${_doubleValue(transaction['amount']).toStringAsFixed(2)}',
                 ),
                 _buildInfoRowWidget(
                   context,
                   'Type',
-                  transaction['transaction_type'] as String? ?? 'N/A',
+                  _stringValue(transaction['transaction_type']),
                 ),
                 _buildInfoRowWidget(
                   context,
                   'Status',
-                  transaction['status'] as String? ?? 'N/A',
+                  _stringValue(transaction['status']),
                 ),
                 _buildInfoRowWidget(
                   context,
                   'Reference',
-                  transaction['reference_id'] as String? ?? 'N/A',
+                  _stringValue(transaction['reference_id']),
                 ),
-                if (transaction['created_at'] != null)
+                if (_dateValue(transaction['created_at']) != null)
                   _buildInfoRowWidget(
                     context,
                     'Date',
-                    _dateFormatter.format(
-                      DateTime.parse(transaction['created_at'] as String),
-                    ),
+                    _dateFormatter.format(_dateValue(transaction['created_at'])!),
                   ),
               ],
             ),
@@ -773,14 +807,31 @@ class _OrderDetailsViewState extends State<OrderDetailsView> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final order = _order;
+    final status = _stringValue(order?['status'], fallback: 'pending');
+    final taskTitle = _stringValue(order?['task_title'], fallback: 'Untitled');
+    final platform =
+        _stringValue(
+          order?['platform'] ?? order?['selected_platform'],
+          fallback: 'N/A',
+        );
+    final quantity = _stringValue(order?['quantity'], fallback: '0');
+    final unitPrice = _doubleValue(order?['unit_price']);
+    final totalPrice = _doubleValue(order?['total_price']);
+    final category = _stringValue(order?['task_category'], fallback: 'N/A');
+    final createdAt = _dateValue(order?['created_at']);
+    final gender = _stringValue(order?['gender'], fallback: 'All Gender');
+    final religion = _stringValue(order?['religion'], fallback: 'All Religion');
+    final stateName = _stringValue(order?['state_name'], fallback: '');
+    final lgaName = _stringValue(order?['lga_name'], fallback: '');
+    final caption = _stringValue(order?['caption'], fallback: '');
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
         title: const Text('Order Details'),
         actions: [
-          if (_order != null &&
-              (_order!['status'] == 'pending' || _order!['status'] == 'active'))
+          if (order != null && (status == 'pending' || status == 'active'))
             _isCancelling
                 ? const Center(
                   child: Padding(
@@ -826,7 +877,7 @@ class _OrderDetailsViewState extends State<OrderDetailsView> {
                       children: [
                         Expanded(
                           child: Text(
-                            _order!['task_title'] as String,
+                            taskTitle,
                             style: GoogleFonts.inter(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
@@ -834,12 +885,12 @@ class _OrderDetailsViewState extends State<OrderDetailsView> {
                             ),
                           ),
                         ),
-                        _buildStatusBadge(_order!['status'] as String),
+                        _buildStatusBadge(status),
                       ],
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Order ID: ${_order!['id']}',
+                      'Order ID: ${_stringValue(order?['id'])}',
                       style: GoogleFonts.inter(
                         fontSize: 12,
                         color: theme.hintColor,
@@ -865,35 +916,35 @@ class _OrderDetailsViewState extends State<OrderDetailsView> {
                             _buildInfoRowWidget(
                               context,
                               'Platform',
-                              _order!['selected_platform'] as String,
+                              platform,
                             ),
                             _buildInfoRowWidget(
                               context,
                               'Quantity',
-                              _order!['quantity'].toString(),
+                              quantity,
                             ),
                             _buildInfoRowWidget(
                               context,
                               'Unit Price',
-                              '₦${(_order!['unit_price'] as num).toStringAsFixed(2)}',
+                              '₦${unitPrice.toStringAsFixed(2)}',
                             ),
                             _buildInfoRowWidget(
                               context,
                               'Total Amount',
-                              '₦${(_order!['total_price'] as num).toStringAsFixed(2)}',
+                              '₦${totalPrice.toStringAsFixed(2)}',
                               isAmount: true,
                             ),
                             _buildInfoRowWidget(
                               context,
                               'Category',
-                              _order!['task_category'] as String,
+                              category,
                             ),
                             _buildInfoRowWidget(
                               context,
                               'Date Created',
-                              _dateFormatter.format(
-                                DateTime.parse(_order!['created_at'] as String),
-                              ),
+                              createdAt != null
+                                  ? _dateFormatter.format(createdAt)
+                                  : 'Unknown date',
                             ),
                           ],
                         ),
@@ -919,32 +970,31 @@ class _OrderDetailsViewState extends State<OrderDetailsView> {
                             _buildInfoRowWidget(
                               context,
                               'Gender',
-                              _order!['gender'] as String? ?? 'All Gender',
+                              gender,
                             ),
                             _buildInfoRowWidget(
                               context,
                               'Religion',
-                              _order!['religion'] as String? ?? 'All Religion',
+                              religion,
                             ),
-                            if (_order!['state_name'] != null)
+                            if (stateName.isNotEmpty)
                               _buildInfoRowWidget(
                                 context,
                                 'State',
-                                _order!['state_name'] as String,
+                                stateName,
                               ),
-                            if (_order!['lga_name'] != null)
+                            if (lgaName.isNotEmpty)
                               _buildInfoRowWidget(
                                 context,
                                 'LGA',
-                                _order!['lga_name'] as String,
+                                lgaName,
                               ),
                           ],
                         ),
                       ),
                     ),
 
-                    if (_order!['caption'] != null &&
-                        (_order!['caption'] as String).isNotEmpty)
+                    if (caption.isNotEmpty)
                       Padding(
                         padding: const EdgeInsets.only(top: 16),
                         child: Card(
@@ -963,7 +1013,7 @@ class _OrderDetailsViewState extends State<OrderDetailsView> {
                                 ),
                                 const SizedBox(height: 8),
                                 Text(
-                                  _order!['caption'] as String,
+                                  caption,
                                   style: theme.textTheme.bodyMedium,
                                 ),
                               ],

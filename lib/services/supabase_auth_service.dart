@@ -438,53 +438,53 @@ class SupabaseAuthService {
 
   // supabase_auth_service.dart - Add these methods to ensure consistency
 
-/// Get user profile with consistent method for all view models
-Future<Map<String, dynamic>?> getUserProfileConsistent() async {
-  try {
+  /// Get user profile with consistent method for all view models
+  Future<Map<String, dynamic>?> getUserProfileConsistent() async {
+    try {
+      final user = _supabase.auth.currentUser;
+      if (user == null) return null;
+
+      // Try the new RPC function first
+      try {
+        final response = await _supabase
+            .rpc('get_profile_with_email')
+            .single()
+            .timeout(const Duration(seconds: 5));
+        return response;
+      } catch (e) {
+        // Fall back to direct table query
+        debugPrint('RPC failed, falling back to direct query: $e');
+        final response = await _supabase
+            .from('profiles')
+            .select()
+            .eq('id', user.id)
+            .single()
+            .timeout(const Duration(seconds: 5));
+
+        // Add email from auth user
+        final profile = Map<String, dynamic>.from(response);
+        profile['email'] = user.email;
+        return profile;
+      }
+    } catch (e) {
+      debugPrint('Error getting consistent user profile: $e');
+      return null;
+    }
+  }
+
+  /// Clear profile cache (add to CacheService too)
+  Future<void> clearProfileCache() async {
+    // Invalidate any cached profile data
     final user = _supabase.auth.currentUser;
-    if (user == null) return null;
-
-    // Try the new RPC function first
-    try {
-      final response = await _supabase
-          .rpc('get_profile_with_email')
-          .single()
-          .timeout(const Duration(seconds: 5));
-      return response;
-    } catch (e) {
-      // Fall back to direct table query
-      debugPrint('RPC failed, falling back to direct query: $e');
-      final response = await _supabase
-          .from('profiles')
-          .select()
-          .eq('id', user.id)
-          .single()
-          .timeout(const Duration(seconds: 5));
-      
-      // Add email from auth user
-      final profile = Map<String, dynamic>.from(response);
-      profile['email'] = user.email;
-      return profile;
-    }
-  } catch (e) {
-    debugPrint('Error getting consistent user profile: $e');
-    return null;
-  }
-}
-
-/// Clear profile cache (add to CacheService too)
-Future<void> clearProfileCache() async {
-  // Invalidate any cached profile data
-  final user = _supabase.auth.currentUser;
-  if (user != null) {
-    try {
-      // Clear any cached data
-      await _supabase.auth.refreshSession();
-    } catch (e) {
-      debugPrint('Error clearing profile cache: $e');
+    if (user != null) {
+      try {
+        // Clear any cached data
+        await _supabase.auth.refreshSession();
+      } catch (e) {
+        debugPrint('Error clearing profile cache: $e');
+      }
     }
   }
-}
 
   // ==========================================
   // WORKER PROFILE MANAGEMENT
@@ -602,7 +602,7 @@ Future<void> clearProfileCache() async {
   }
 
   /// Submit task proof (using the new system)
-/// SupabaseAuthService - Update the submitTaskProof method
+  /// SupabaseAuthService - Update the submitTaskProof method
   Future<Map<String, dynamic>> submitTaskProof({
     required String assignmentId,
     required String platformUsername,
@@ -624,9 +624,9 @@ Future<void> clearProfileCache() async {
       };
     }
   }
-  
+
   /// Get worker statistics
-Future<Map<String, dynamic>> getWorkerStatistics() async {
+  Future<Map<String, dynamic>> getWorkerStatistics() async {
     try {
       final user = _supabase.auth.currentUser;
       if (user == null) {
@@ -663,18 +663,34 @@ Future<Map<String, dynamic>> getWorkerStatistics() async {
       // The response should be a map since we used maybeSingle()
       final stats = response as Map<String, dynamic>;
 
+      double _toDouble(dynamic value) {
+        if (value == null) return 0.0;
+        if (value is num) return value.toDouble();
+        if (value is String) return double.tryParse(value) ?? 0.0;
+        return 0.0;
+      }
+
+      int _toInt(dynamic value) {
+        if (value == null) return 0;
+        if (value is int) return value;
+        if (value is num) return value.toInt();
+        if (value is String) return int.tryParse(value) ?? 0;
+        return 0;
+      }
+
       return {
         'success': true,
         'data': {
-          'total_earnings': (stats['total_earnings'] ?? 0.0) as double,
-          'total_tasks_completed': (stats['total_tasks_completed'] ?? 0) as int,
-          'average_rating': (stats['average_rating'] ?? 0.0) as double,
-          'success_rate': (stats['success_rate'] ?? 0.0) as double,
-          'pending_payouts': (stats['pending_payouts'] ?? 0.0) as double,
-          'available_tasks': (stats['available_tasks'] ?? 0) as int,
-          'wallet_balance': (stats['wallet_balance'] ?? 0.0) as double,
-          'wallet_available_balance':
-              (stats['wallet_available_balance'] ?? 0.0) as double,
+          'total_earnings': _toDouble(stats['total_earnings']),
+          'total_tasks_completed': _toInt(stats['total_tasks_completed']),
+          'average_rating': _toDouble(stats['average_rating']),
+          'success_rate': _toDouble(stats['success_rate']),
+          'pending_payouts': _toDouble(stats['pending_payouts']),
+          'available_tasks': _toInt(stats['available_tasks']),
+          'wallet_balance': _toDouble(stats['wallet_balance']),
+          'wallet_available_balance': _toDouble(
+            stats['wallet_available_balance'],
+          ),
         },
       };
     } catch (e) {
@@ -776,6 +792,10 @@ Future<Map<String, dynamic>> getWorkerStatistics() async {
     String? targetLink,
     String? targetUsername,
     Map<String, dynamic> metadata = const {},
+    String? ipAddress,
+    String? userAgent,
+    String? deviceId,
+    Map<String, dynamic>? location,
   }) async {
     try {
       return await _taskService.createAdvertiserOrder(
@@ -787,10 +807,30 @@ Future<Map<String, dynamic>> getWorkerStatistics() async {
         targetLink: targetLink,
         targetUsername: targetUsername,
         metadata: metadata,
+        ipAddress: ipAddress,
+        userAgent: userAgent,
+        deviceId: deviceId,
+        location: location,
       );
     } catch (e) {
       debugPrint('Error creating advertiser order: $e');
       return {'success': false, 'message': 'Failed to create order'};
+    }
+  }
+
+  /// Upload advert/engagement media for an existing order.
+  Future<Map<String, dynamic>> uploadOrderMediaFiles({
+    required String orderId,
+    required List<File> mediaFiles,
+  }) async {
+    try {
+      return await _taskService.uploadOrderMediaFiles(
+        orderId: orderId,
+        mediaFiles: mediaFiles,
+      );
+    } catch (e) {
+      debugPrint('Error uploading order media: $e');
+      return {'success': false, 'message': 'Failed to upload order media'};
     }
   }
 

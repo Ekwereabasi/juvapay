@@ -61,6 +61,15 @@
                 <data android:host="reset-password" />
             </intent-filter>
 
+            <!-- Deep Links for product pages -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="juvapay" />
+                <data android:host="product" />
+            </intent-filter>
+
             <!-- Handle https links if you have a website -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />

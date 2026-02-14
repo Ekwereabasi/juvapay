@@ -41,7 +41,29 @@ class _WorkerTaskListViewState extends State<WorkerTaskListView> {
       );
 
       setState(() {
-        _availableTasks = tasks;
+        final seenKeys = <String>{};
+        _availableTasks =
+            tasks.where((task) {
+              final orderId = task['order_id']?.toString();
+              final assignmentId = task['assignment_id']?.toString();
+              final taskTitle = task['task_title']?.toString();
+              final key =
+                  (orderId != null && orderId.isNotEmpty)
+                      ? 'order:$orderId'
+                      : (assignmentId != null && assignmentId.isNotEmpty)
+                      ? 'assignment:$assignmentId'
+                      : (taskTitle != null && taskTitle.isNotEmpty)
+                      ? 'title:$taskTitle'
+                      : null;
+              if (key == null) {
+                return true;
+              }
+              if (seenKeys.contains(key)) {
+                return false;
+              }
+              seenKeys.add(key);
+              return true;
+            }).toList();
         _isLoading = false;
       });
     } catch (e) {
@@ -63,24 +85,48 @@ class _WorkerTaskListViewState extends State<WorkerTaskListView> {
       debugPrint('Claim task result: $result');
 
       if (result['success'] == true) {
-        // Get the assignment_id from the result
-        final assignmentId = result['assignment_id'];
+        final assignmentId = result['assignment_id']?.toString();
+        final task = _availableTasks.cast<Map<String, dynamic>?>().firstWhere(
+          (t) => t?['queue_id']?.toString() == queueId,
+          orElse: () => null,
+        );
 
-        // Get the full task details with the assignment
-        final assignedTask = await _fetchAssignedTask(assignmentId);
+        if (task != null && assignmentId != null && assignmentId.isNotEmpty) {
+          final taskData = {
+            ...task,
+            'assignment_id': assignmentId,
+            'status': 'assigned',
+          };
 
-        if (assignedTask != null) {
-          // Navigate to task execution screen with complete task data
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(
-              builder: (context) => TaskExecutionScreen(taskData: assignedTask),
+              builder: (context) => TaskExecutionScreen(taskData: taskData),
             ),
           );
+        } else if (assignmentId != null && assignmentId.isNotEmpty) {
+          // Fallback for stale list data
+          final assignedTask = await _fetchAssignedTask(assignmentId);
+          if (assignedTask != null) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(
+                builder:
+                    (context) => TaskExecutionScreen(taskData: assignedTask),
+              ),
+            );
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Failed to load task details'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Failed to load task details'),
+              content: Text('Failed to claim task: invalid assignment'),
               backgroundColor: Colors.red,
             ),
           );
@@ -117,57 +163,9 @@ class _WorkerTaskListViewState extends State<WorkerTaskListView> {
       if (user == null) return null;
 
       debugPrint('Fetching assigned task for assignmentId: $assignmentId');
-
-      // Query to get the assigned task with all details
-      final response =
-          await _supabase
-              .from('task_assignments')
-              .select('''
-            *,
-            task_queue:queue_id (
-              *,
-              task_catalog:task_catalog_id (*)
-            )
-          ''')
-              .eq('id', assignmentId)
-              .eq('worker_id', user.id)
-              .single();
-
-      debugPrint('Assigned task response: $response');
-
-      if (response != null) {
-        // Merge assignment and queue data
-        final queueData = response['task_queue'] as Map<String, dynamic>? ?? {};
-        final catalogData =
-            queueData['task_catalog'] as Map<String, dynamic>? ?? {};
-
-        return {
-          'assignment_id': assignmentId,
-          'queue_id': response['queue_id'],
-          'platform': queueData['platform']?.toString() ?? 'social',
-          'payout_amount':
-              (queueData['payout_amount'] as num?)?.toDouble() ?? 0.0,
-          'task_title':
-              catalogData['title']?.toString() ??
-              queueData['task_title']?.toString() ??
-              'Social Media Task',
-          'task_description':
-              catalogData['description']?.toString() ??
-              queueData['task_description']?.toString() ??
-              'Complete the social media task',
-          'target_link': queueData['target_link']?.toString(),
-          'target_username': queueData['target_username']?.toString(),
-          'ad_content': queueData['ad_content']?.toString(),
-          'instructions': catalogData['instructions'] ?? [],
-          'requirements': catalogData['requirements'] ?? [],
-          'expires_at':
-              response['expires_at']?.toString() ??
-              queueData['expires_at']?.toString(),
-          'estimated_time': catalogData['estimated_time'] as int? ?? 1440,
-          'status': response['status']?.toString() ?? 'claimed',
-        };
-      }
-      return null;
+      return await _taskService.getTaskExecutionDetails(
+        assignmentId: assignmentId,
+      );
     } catch (e) {
       debugPrint('Error fetching assigned task: $e');
       return null;

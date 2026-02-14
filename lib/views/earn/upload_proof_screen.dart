@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:juvapay/services/supabase_auth_service.dart';
+import '../settings/subpages/order/my_orders_view.dart';
 
 class UploadProofScreen extends StatefulWidget {
   final String assignmentId;
@@ -266,6 +267,32 @@ class _UploadProofScreenState extends State<UploadProofScreen> {
                   ),
                   child: const Text(
                     "OK",
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                OutlinedButton(
+                  onPressed: () {
+                    Navigator.pop(ctx); // Close dialog
+                    Navigator.pop(context); // Close upload screen
+                    Navigator.pop(context); // Close task execution screen
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (context) => const OrderHistoryView(),
+                      ),
+                    );
+                  },
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 24,
+                      vertical: 12,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  child: const Text(
+                    "Order History",
                     style: TextStyle(fontWeight: FontWeight.w600),
                   ),
                 ),

@@ -529,7 +529,12 @@ Future<Map<String, dynamic>> checkAdvertSubscription() async {
     }
   }
   // Process advert payment
-Future<Map<String, dynamic>> processAdvertPayment() async {
+Future<Map<String, dynamic>> processAdvertPayment({
+  String? ipAddress,
+  String? userAgent,
+  String? deviceId,
+  Map<String, dynamic>? location,
+}) async {
     try {
       final user = _supabase.auth.currentUser;
       if (user == null) throw Exception('User not authenticated');
@@ -543,7 +548,11 @@ Future<Map<String, dynamic>> processAdvertPayment() async {
           'advert_type': 'monthly_subscription',
           'duration_days': 30,
           'auto_renew': true,
+          if (location != null) 'client_location': location,
         },
+        ipAddress: ipAddress,
+        userAgent: userAgent,
+        deviceId: deviceId,
       );
 
       if (result['success'] == true) {

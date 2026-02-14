@@ -1,8 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:gal/gal.dart';
+import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
-import 'package:juvapay/services/supabase_auth_service.dart';
 import 'package:juvapay/utils/platform_helper.dart';
+import 'package:juvapay/services/task_service.dart';
 import 'upload_proof_screen.dart';
 
 class TaskExecutionScreen extends StatefulWidget {
@@ -15,60 +18,191 @@ class TaskExecutionScreen extends StatefulWidget {
 }
 
 class _TaskExecutionScreenState extends State<TaskExecutionScreen> {
-  final SupabaseAuthService _authService = SupabaseAuthService();
+  final TaskService _taskService = TaskService();
   Timer? _timer;
   Duration _timeLeft = const Duration(
     hours: 24,
   ); // Default 24 hours for new system
   bool _isLoading = false;
+  bool _isFetchingTaskDetails = false;
+  bool _isDownloadingImage = false;
   String? _assignmentId;
   String? _queueId;
+  late Map<String, dynamic> _taskData;
 
-@override
-void initState() {
-  super.initState();
-  _initializeTaskData();
-  _initializeTimer();
-  
-  // Debug print to see what data we have
-  debugPrint('Task data keys: ${widget.taskData.keys.toList()}');
-  debugPrint('Assignment ID: ${widget.taskData['assignment_id']}');
-  debugPrint('Queue ID: ${widget.taskData['queue_id']}');
-}
+  @override
+  void initState() {
+    super.initState();
+    _taskData = Map<String, dynamic>.from(widget.taskData);
+    _initializeTaskData();
+    _initializeTimer();
+    _fetchLatestTaskDetails();
 
-void _initializeTaskData() {
-  // Extract data from task structure
-  _assignmentId = widget.taskData['assignment_id']?.toString();
-  _queueId = widget.taskData['queue_id']?.toString();
-
-  // If assignment_id is not in the main map, check nested structures
-  if (_assignmentId == null) {
-    // Check if assignment_id is in a nested result field
-    if (widget.taskData.containsKey('result') && 
-        widget.taskData['result'] is Map) {
-      _assignmentId = widget.taskData['result']['assignment_id']?.toString();
-    }
+    // Debug print to see what data we have
+    debugPrint('Task data keys: ${_taskData.keys.toList()}');
+    debugPrint('Assignment ID: ${_taskData['assignment_id']}');
+    debugPrint('Queue ID: ${_taskData['queue_id']}');
   }
 
-  debugPrint('Final Assignment ID: $_assignmentId');
-  debugPrint('Final Queue ID: $_queueId');
+  void _initializeTaskData() {
+    // Extract data from task structure
+    _assignmentId = _taskData['assignment_id']?.toString();
+    _queueId = _taskData['queue_id']?.toString();
 
-  // Set time based on task requirements
-  if (widget.taskData.containsKey('expires_at')) {
-    try {
-      final expiresAt = DateTime.parse(widget.taskData['expires_at'].toString());
-      final now = DateTime.now();
-      if (expiresAt.isAfter(now)) {
-        _timeLeft = expiresAt.difference(now);
+    // If assignment_id is not in the main map, check nested structures
+    if (_assignmentId == null) {
+      // Check if assignment_id is in a nested result field
+      if (_taskData.containsKey('result') && _taskData['result'] is Map) {
+        _assignmentId = _taskData['result']['assignment_id']?.toString();
       }
-    } catch (e) {
-      debugPrint('Error parsing expires_at: $e');
     }
-  } else if (widget.taskData.containsKey('estimated_time')) {
-    final minutes = widget.taskData['estimated_time'] as int? ?? 1440;
-    _timeLeft = Duration(minutes: minutes);
+
+    debugPrint('Final Assignment ID: $_assignmentId');
+    debugPrint('Final Queue ID: $_queueId');
+
+    // Set time based on task requirements
+    if (_taskData.containsKey('expires_at')) {
+      try {
+        final expiresAt = DateTime.parse(_taskData['expires_at'].toString());
+        final now = DateTime.now();
+        if (expiresAt.isAfter(now)) {
+          _timeLeft = expiresAt.difference(now);
+        }
+      } catch (e) {
+        debugPrint('Error parsing expires_at: $e');
+      }
+    } else if (_taskData.containsKey('estimated_time')) {
+      final minutes = _taskData['estimated_time'] as int? ?? 1440;
+      _timeLeft = Duration(minutes: minutes);
+    }
   }
-}
+
+  Future<void> _fetchLatestTaskDetails() async {
+    if (_isFetchingTaskDetails) return;
+    if (_assignmentId == null && _queueId == null) return;
+
+    setState(() => _isFetchingTaskDetails = true);
+
+    try {
+      final Map<String, dynamic>? taskDetails = await _loadTaskDetailsFromDb();
+      if (!mounted || taskDetails == null) return;
+
+      setState(() {
+        _taskData = {..._taskData, ...taskDetails};
+        _initializeTaskData();
+      });
+    } catch (e) {
+      debugPrint('Failed to fetch latest task details: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _isFetchingTaskDetails = false);
+      }
+    }
+  }
+
+  Future<Map<String, dynamic>?> _loadTaskDetailsFromDb() async {
+    return _taskService.getTaskExecutionDetails(
+      assignmentId: _assignmentId,
+      queueId: _queueId,
+      fallbackTaskData: _taskData,
+    );
+  }
+
+  String? _firstNonEmptyString(List<dynamic> values) {
+    for (final value in values) {
+      final text = value?.toString().trim();
+      if (text != null && text.isNotEmpty && text != 'null') {
+        return text;
+      }
+    }
+    return null;
+  }
+
+  Map<String, dynamic> _taskMetadata() {
+    final metadata = _taskData['metadata'];
+    if (metadata is Map<String, dynamic>) return metadata;
+    if (metadata is String && metadata.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(metadata);
+        if (decoded is Map<String, dynamic>) return decoded;
+      } catch (_) {}
+    }
+    return {};
+  }
+
+  List<String> _collectTaskLinks() {
+    final links = <String>{};
+
+    final directLink = _taskData['target_link']?.toString().trim();
+    if (directLink != null && directLink.isNotEmpty) {
+      links.add(directLink);
+    }
+
+    for (final key in [
+      'secondary_link',
+      'backup_link',
+      'profile_link',
+      'post_link',
+      'link',
+    ]) {
+      final value = _taskData[key]?.toString().trim();
+      if (value != null && value.isNotEmpty) {
+        links.add(value);
+      }
+    }
+
+    final metadata = _taskMetadata();
+    final metadataLinks = metadata['links'];
+    if (metadataLinks is List) {
+      for (final entry in metadataLinks) {
+        final link = entry?.toString().trim();
+        if (link != null && link.isNotEmpty) {
+          links.add(link);
+        }
+      }
+    }
+
+    for (final key in ['link', 'url', 'target_link']) {
+      final value = metadata[key]?.toString().trim();
+      if (value != null && value.isNotEmpty) {
+        links.add(value);
+      }
+    }
+
+    return links.toList();
+  }
+
+  Future<void> _downloadTaskImage() async {
+    final imageUrl = _taskData['ad_image_url']?.toString();
+    if (imageUrl == null || imageUrl.isEmpty) {
+      _showSnackBar("No task image available", isError: true);
+      return;
+    }
+
+    if (_isDownloadingImage) return;
+    setState(() => _isDownloadingImage = true);
+
+    try {
+      final response = await http.get(Uri.parse(imageUrl));
+      if (response.statusCode != 200) {
+        throw Exception('Download failed (${response.statusCode})');
+      }
+
+      await Gal.putImageBytes(
+        response.bodyBytes,
+        name: 'juvapay_task_${DateTime.now().millisecondsSinceEpoch}',
+        album: 'JuvaPay Tasks',
+      );
+
+      _showSnackBar('Task image saved to gallery');
+    } catch (e) {
+      _showSnackBar('Failed to save image: ${e.toString()}', isError: true);
+    } finally {
+      if (mounted) {
+        setState(() => _isDownloadingImage = false);
+      }
+    }
+  }
 
   void _initializeTimer() {
     _startTimer();
@@ -107,7 +241,7 @@ void _initializeTaskData() {
   }
 
   Future<void> _visitLink() async {
-    final String? link = widget.taskData['target_link'];
+    final String? link = _taskData['target_link']?.toString();
     if (link == null || link.isEmpty) {
       _showSnackBar("No link provided for this task", isError: true);
       return;
@@ -236,7 +370,7 @@ void _initializeTaskData() {
         builder:
             (context) => UploadProofScreen(
               assignmentId: _assignmentId!,
-              taskData: widget.taskData,
+              taskData: _taskData,
             ),
       ),
     );
@@ -281,14 +415,15 @@ void _initializeTaskData() {
 
   Widget _buildBody(ThemeData theme, bool isDark) {
     final platformName =
-        widget.taskData['platform']?.toString().toLowerCase() ?? 'facebook';
+        _taskData['platform']?.toString().toLowerCase() ?? 'facebook';
     final platformDisplayName = PlatformHelper.getPlatformDisplayName(
       platformName,
     );
     final platformColor = PlatformHelper.getPlatformColor(platformName);
     final platformIcon = PlatformHelper.getPlatformIcon(platformName);
-    final payoutAmount = widget.taskData['payout_amount'] ?? 0.0;
-    final taskTitle = widget.taskData['task_title'] ?? 'Social Media Task';
+    final payoutAmount =
+        (_taskData['payout_amount'] as num?)?.toDouble() ?? 0.0;
+    final taskTitle = _taskData['task_title'] ?? 'Social Media Task';
 
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
@@ -307,6 +442,8 @@ void _initializeTaskData() {
             payoutAmount: payoutAmount,
             taskTitle: taskTitle,
           ),
+          SizedBox(height: 20),
+          _buildTaskMediaSection(theme),
           SizedBox(height: 20),
           _buildInstructionsSection(theme, platformDisplayName),
           SizedBox(height: 30),
@@ -411,7 +548,7 @@ void _initializeTaskData() {
           ),
         ),
         const SizedBox(height: 12),
-        if (widget.taskData['target_link'] != null)
+        if ((_taskData['target_link']?.toString().trim().isNotEmpty ?? false))
           ElevatedButton.icon(
             onPressed: _isLoading ? null : _visitLink,
             icon: Icon(
@@ -444,9 +581,13 @@ void _initializeTaskData() {
     ThemeData theme,
     String platformDisplayName,
   ) {
-    final instructions = widget.taskData['instructions'] as List<dynamic>?;
-    final adContent = widget.taskData['ad_content']?.toString();
-    final targetUsername = widget.taskData['target_username']?.toString();
+    final instructions = _taskData['instructions'] as List<dynamic>?;
+    final adContent = _firstNonEmptyString([
+      _taskData['ad_content'],
+      _taskData['caption'],
+      _taskData['ad_caption'],
+    ]);
+    final targetUsername = _taskData['target_username']?.toString();
 
     List<String> defaultInstructions = [
       "Click the 'Visit Task Link' button above to access the content.",
@@ -476,7 +617,7 @@ void _initializeTaskData() {
         if (adContent != null && adContent.isNotEmpty) ...[
           SizedBox(height: 20),
           Text(
-            "Ad Content:",
+            "Caption / Ad Content:",
             style: theme.textTheme.titleMedium?.copyWith(
               fontWeight: FontWeight.w600,
             ),
@@ -504,6 +645,145 @@ void _initializeTaskData() {
         ],
       ],
     );
+  }
+
+  Widget _buildTaskMediaSection(ThemeData theme) {
+    final imageUrl = _firstNonEmptyString([
+      _taskData['ad_image_url'],
+      _taskData['ad_image'],
+      _taskData['image_url'],
+      _taskData['target_image_url'],
+    ]);
+    final taskLinks = _collectTaskLinks();
+
+    if ((imageUrl == null || imageUrl.isEmpty) && taskLinks.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: theme.cardColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: theme.dividerColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (_isFetchingTaskDetails)
+            const Padding(
+              padding: EdgeInsets.only(bottom: 10),
+              child: LinearProgressIndicator(minHeight: 2),
+            ),
+          if (imageUrl != null && imageUrl.isNotEmpty) ...[
+            Text(
+              "Task Image",
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 8),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: AspectRatio(
+                aspectRatio: 16 / 9,
+                child: Image.network(
+                  imageUrl,
+                  fit: BoxFit.cover,
+                  errorBuilder:
+                      (_, __, ___) => Container(
+                        color: theme.colorScheme.surfaceVariant,
+                        alignment: Alignment.center,
+                        child: const Icon(Icons.broken_image),
+                      ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _isDownloadingImage ? null : _downloadTaskImage,
+              icon: Icon(
+                _isDownloadingImage ? Icons.hourglass_top : Icons.download,
+              ),
+              label: Text(_isDownloadingImage ? 'Saving...' : 'Download Image'),
+            ),
+          ],
+          if (taskLinks.isNotEmpty) ...[
+            if (imageUrl != null && imageUrl.isNotEmpty)
+              const SizedBox(height: 6),
+            Text(
+              "Task Links",
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 8),
+            ...taskLinks.map(
+              (link) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: InkWell(
+                  onTap: () => _openSpecificLink(link),
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                      color: theme.colorScheme.primary.withOpacity(0.08),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.link,
+                          size: 18,
+                          color: theme.colorScheme.primary,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            link,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: theme.colorScheme.primary),
+                          ),
+                        ),
+                        Icon(
+                          Icons.open_in_new,
+                          size: 16,
+                          color: theme.colorScheme.primary,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openSpecificLink(String link) async {
+    final uri = Uri.tryParse(link);
+    if (uri == null) {
+      _showSnackBar("Invalid URL format", isError: true);
+      return;
+    }
+
+    try {
+      final launched = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (!launched) {
+        _showSnackBar("Could not launch link", isError: true);
+      }
+    } catch (e) {
+      _showSnackBar("Error launching link: ${e.toString()}", isError: true);
+    }
   }
 
   Widget _buildStep(int number, String text, ThemeData theme) {

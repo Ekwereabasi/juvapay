@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/wallet_service.dart'; // Import WalletService
+import '../utils/transaction_context.dart';
 
 // ==========================================
 // --- WALLET DATA MODEL ---
@@ -244,13 +245,17 @@ class WalletViewModel extends ChangeNotifier {
     String? deviceId,
   }) async {
     try {
+      final txContext =
+          (ipAddress == null || userAgent == null || deviceId == null)
+              ? await TransactionContext.fetch()
+              : null;
       final result = await _walletService.processDeposit(
         amount: amount,
         referenceId: referenceId,
         gatewayResponse: gatewayResponse,
-        ipAddress: ipAddress,
-        userAgent: userAgent,
-        deviceId: deviceId,
+        ipAddress: ipAddress ?? txContext?.ipAddress,
+        userAgent: userAgent ?? txContext?.userAgent,
+        deviceId: deviceId ?? txContext?.deviceId,
       );
 
       // Refresh wallet data after successful deposit
@@ -278,12 +283,16 @@ class WalletViewModel extends ChangeNotifier {
     String? userAgent,
   }) async {
     try {
+      final txContext =
+          (ipAddress == null || userAgent == null)
+              ? await TransactionContext.fetch()
+              : null;
       final result = await _walletService.processWithdrawal(
         amount: amount,
         bankDetails: bankDetails,
         description: description,
-        ipAddress: ipAddress,
-        userAgent: userAgent,
+        ipAddress: ipAddress ?? txContext?.ipAddress,
+        userAgent: userAgent ?? txContext?.userAgent,
       );
 
       // Refresh wallet data after successful withdrawal
@@ -315,16 +324,24 @@ class WalletViewModel extends ChangeNotifier {
     String? deviceId,
   }) async {
     try {
+      final txContext =
+          (ipAddress == null || userAgent == null || deviceId == null)
+              ? await TransactionContext.fetch()
+              : null;
+      final enrichedMetadata = {
+        if (metadata != null) ...metadata,
+        if (txContext?.location != null) 'client_location': txContext!.location,
+      };
       final result = await _walletService.processPayment(
         amount: amount,
         transactionType: transactionType,
         description: description,
         referenceId: referenceId,
-        metadata: metadata,
+        metadata: enrichedMetadata.isEmpty ? null : enrichedMetadata,
         orderId: orderId,
-        ipAddress: ipAddress,
-        userAgent: userAgent,
-        deviceId: deviceId,
+        ipAddress: ipAddress ?? txContext?.ipAddress,
+        userAgent: userAgent ?? txContext?.userAgent,
+        deviceId: deviceId ?? txContext?.deviceId,
       );
 
       // Refresh wallet data after successful payment
@@ -352,12 +369,16 @@ class WalletViewModel extends ChangeNotifier {
     String? userAgent,
   }) async {
     try {
+      final txContext =
+          (ipAddress == null || userAgent == null)
+              ? await TransactionContext.fetch()
+              : null;
       final result = await _walletService.transferBetweenWallets(
         destinationUserId: destinationUserId,
         amount: amount,
         description: description,
-        ipAddress: ipAddress,
-        userAgent: userAgent,
+        ipAddress: ipAddress ?? txContext?.ipAddress,
+        userAgent: userAgent ?? txContext?.userAgent,
       );
 
       // Refresh wallet data after successful transfer

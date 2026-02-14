@@ -1,6 +1,8 @@
 // worker_task_history_view.dart
 import 'package:flutter/material.dart';
 import 'package:juvapay/services/supabase_auth_service.dart';
+import 'package:juvapay/services/task_service.dart';
+import 'package:juvapay/views/earn/task_execution_view.dart';
 
 class WorkerTaskHistoryView extends StatefulWidget {
   const WorkerTaskHistoryView({super.key});
@@ -11,6 +13,7 @@ class WorkerTaskHistoryView extends StatefulWidget {
 
 class _WorkerTaskHistoryViewState extends State<WorkerTaskHistoryView> {
   final SupabaseAuthService _authService = SupabaseAuthService();
+  final TaskService _taskService = TaskService();
   List<Map<String, dynamic>> _taskHistory = [];
   bool _isLoading = true;
   String? _errorMessage;
@@ -333,10 +336,97 @@ class _WorkerTaskHistoryViewState extends State<WorkerTaskHistoryView> {
                   ],
                 ),
               ),
+            if (_canContinueTask(status))
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () => _continueTask(task),
+                    icon: const Icon(Icons.play_arrow_rounded),
+                    label: const Text('Continue Task'),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
     );
+  }
+
+  bool _canContinueTask(String status) {
+    final normalized = status.toLowerCase();
+    return normalized == 'assigned' ||
+        normalized == 'claimed' ||
+        normalized == 'in_progress';
+  }
+
+  Future<void> _continueTask(Map<String, dynamic> task) async {
+    final assignmentId = _firstNonEmptyString([
+      task['assignment_id'],
+      task['id'],
+      task['task_assignment_id'],
+    ]);
+    final queueId = _firstNonEmptyString([
+      task['queue_id'],
+      task['task_queue_id'],
+    ]);
+
+    if (assignmentId == null && queueId == null) {
+      _showSnackBar('Unable to open task details', isError: true);
+      return;
+    }
+
+    setState(() => _isLoading = true);
+    try {
+      final latestTaskDetails = await _taskService.getTaskExecutionDetails(
+        assignmentId: assignmentId,
+        queueId: queueId,
+        fallbackTaskData: task,
+      );
+
+      final taskData = latestTaskDetails ?? task;
+      if (!mounted) return;
+
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => TaskExecutionScreen(taskData: taskData),
+        ),
+      );
+
+      if (mounted) {
+        _loadTaskHistory();
+      }
+    } catch (e) {
+      _showSnackBar('Failed to open task: ${e.toString()}', isError: true);
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  String? _firstNonEmptyString(List<dynamic> values) {
+    for (final value in values) {
+      final text = value?.toString().trim();
+      if (text != null && text.isNotEmpty && text != 'null') {
+        return text;
+      }
+    }
+    return null;
+  }
+
+  void _showSnackBar(String message, {bool isError = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: isError ? Colors.red : Colors.green,
+        ),
+      );
   }
 
   Color _getPlatformColor(String platform) {

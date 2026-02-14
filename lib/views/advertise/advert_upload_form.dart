@@ -11,6 +11,7 @@ import '../../models/task_models.dart';
 import '../../models/location_models.dart';
 import '../../utils/platform_helper.dart';
 import '../../utils/form_field_helper.dart';
+import '../../utils/transaction_context.dart';
 import '../settings/subpages/fund_wallet_view.dart';
 
 class AdvertFormPage extends StatefulWidget {
@@ -85,8 +86,7 @@ class _AdvertFormPageState extends State<AdvertFormPage> {
   }
 
   void _initializeForm() {
-    // Set default caption based on task
-    _captionController.text = widget.task.description;
+    _captionController.text = '';
   }
 
   Future<void> _loadInitialData() async {
@@ -334,6 +334,7 @@ class _AdvertFormPageState extends State<AdvertFormPage> {
     setState(() => _isLoading = true);
 
     try {
+      final txContext = await TransactionContext.fetch();
       final result = await _authService.createAdvertiserOrder(
         taskId: widget.task.id,
         platform: widget.platform,
@@ -352,11 +353,33 @@ class _AdvertFormPageState extends State<AdvertFormPage> {
           'media_count': _selectedMediaFiles.length,
           'requires_media_upload': true,
         },
+        ipAddress: txContext.ipAddress,
+        userAgent: txContext.userAgent,
+        deviceId: txContext.deviceId,
+        location: txContext.location,
       );
 
       debugPrint('Order creation result: $result');
 
       if (result['success'] == true) {
+        final orderId = result['order_id']?.toString();
+        if (orderId != null &&
+            orderId.isNotEmpty &&
+            _selectedMediaFiles.isNotEmpty) {
+          final uploadResult = await _authService.uploadOrderMediaFiles(
+            orderId: orderId,
+            mediaFiles: _selectedMediaFiles,
+          );
+          if (uploadResult['success'] != true) {
+            debugPrint('Order media upload failed: $uploadResult');
+            if (mounted) {
+              _showError(
+                uploadResult['message']?.toString() ??
+                    'Order created, but media upload failed.',
+              );
+            }
+          }
+        }
         _showSuccessDialog();
       } else {
         // Show detailed error message
@@ -370,8 +393,6 @@ class _AdvertFormPageState extends State<AdvertFormPage> {
           _showWalletLockedDialog(errorMessage);
         } else if (errorMessage.contains('Task not found')) {
           _showError('The selected task is no longer available.');
-        } else if (errorMessage.contains('payment')) {
-          _showError('Payment processing failed. Please try again.');
         } else {
           _showError(errorMessage);
         }

@@ -1,6 +1,56 @@
 // models/marketplace_models.dart
 import 'dart:convert';
 
+int _parseInt(dynamic value, {int defaultValue = 0}) {
+  if (value == null) return defaultValue;
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  if (value is String) return int.tryParse(value) ?? defaultValue;
+  return defaultValue;
+}
+
+double _parseDouble(dynamic value, {double defaultValue = 0.0}) {
+  if (value == null) return defaultValue;
+  if (value is double) return value;
+  if (value is int) return value.toDouble();
+  if (value is num) return value.toDouble();
+  if (value is String) return double.tryParse(value) ?? defaultValue;
+  return defaultValue;
+}
+
+DateTime _parseDateTime(dynamic value) {
+  if (value == null) {
+    return DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+  }
+  if (value is DateTime) return value;
+  if (value is String) {
+    try {
+      return DateTime.parse(value);
+    } catch (_) {
+      return DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+    }
+  }
+  return DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+}
+
+List<String> _parseStringList(dynamic value) {
+  if (value == null) return const [];
+  if (value is List) {
+    return value.map((e) => e.toString()).toList();
+  }
+  if (value is String) {
+    try {
+      final decoded = jsonDecode(value);
+      if (decoded is List) {
+        return decoded.map((e) => e.toString()).toList();
+      }
+    } catch (_) {
+      return [value];
+    }
+  }
+  return const [];
+}
+
 class MarketplaceProduct {
   final int id;
   final String userId;
@@ -17,6 +67,9 @@ class MarketplaceProduct {
   final int? stateId;
   final int? lgaId;
   final String status;
+  final bool isBanned;
+  final String? bannedReason;
+  final DateTime? bannedAt;
   final DateTime createdAt;
   final double? oldPrice;
   final String? brand;
@@ -42,6 +95,9 @@ class MarketplaceProduct {
     this.stateId,
     this.lgaId,
     required this.status,
+    required this.isBanned,
+    this.bannedReason,
+    this.bannedAt,
     required this.createdAt,
     this.oldPrice,
     this.brand,
@@ -49,7 +105,7 @@ class MarketplaceProduct {
     required this.likesCount,
     required this.images,
     required this.seller, // Changed to required
-  }) : isActive = status == 'ACTIVE';
+  }) : isActive = status == 'ACTIVE' && !isBanned;
 
   factory MarketplaceProduct.fromJson(Map<String, dynamic> json) {
     // Parse images
@@ -77,26 +133,34 @@ class MarketplaceProduct {
     }
 
     return MarketplaceProduct(
-      id: (json['id'] as num).toInt(),
-      userId: json['user_id'] as String,
-      title: json['title'] as String,
-      quantity: (json['quantity'] as num?)?.toInt() ?? 1,
-      price: (json['price'] as num).toDouble(),
-      description: json['description'] as String,
-      availableSizes: List<String>.from(json['available_sizes'] ?? []),
-      availableColors: List<String>.from(json['available_colors'] ?? []),
+      id: _parseInt(json['id']),
+      userId: (json['user_id'] ?? '').toString(),
+      title: (json['title'] ?? '').toString(),
+      quantity: _parseInt(json['quantity'], defaultValue: 1),
+      price: _parseDouble(json['price']),
+      description: (json['description'] ?? '').toString(),
+      availableSizes: _parseStringList(json['available_sizes']),
+      availableColors: _parseStringList(json['available_colors']),
       returnPolicy: json['return_policy'] as String?,
-      mainCategory: json['main_category'] as String,
+      mainCategory: (json['main_category'] ?? '').toString(),
       subCategory1: json['sub_category_1'] as String?,
       subCategory2: json['sub_category_2'] as String?,
-      stateId: (json['state_id'] as num?)?.toInt(),
-      lgaId: (json['lga_id'] as num?)?.toInt(),
+      stateId: json['state_id'] == null ? null : _parseInt(json['state_id']),
+      lgaId: json['lga_id'] == null ? null : _parseInt(json['lga_id']),
       status: (json['status'] as String?) ?? 'ACTIVE',
-      createdAt: DateTime.parse(json['created_at'] as String),
-      oldPrice: (json['old_price'] as num?)?.toDouble(),
+      isBanned: json['is_banned'] == true,
+      bannedReason: json['banned_reason'] as String?,
+      bannedAt:
+          json['banned_at'] != null
+              ? _parseDateTime(json['banned_at'])
+              : null,
+      createdAt: _parseDateTime(json['created_at']),
+      oldPrice: json['old_price'] == null
+          ? null
+          : _parseDouble(json['old_price']),
       brand: json['brand'] as String?,
-      viewsCount: (json['views_count'] as num?)?.toInt() ?? 0,
-      likesCount: (json['likes_count'] as num?)?.toInt() ?? 0,
+      viewsCount: _parseInt(json['views_count']),
+      likesCount: _parseInt(json['likes_count']),
       images: images,
       seller: seller,
     );
@@ -119,6 +183,9 @@ class MarketplaceProduct {
       'state_id': stateId,
       'lga_id': lgaId,
       'status': status,
+      'is_banned': isBanned,
+      'banned_reason': bannedReason,
+      'banned_at': bannedAt?.toIso8601String(),
       'created_at': createdAt.toIso8601String(),
       'old_price': oldPrice,
       'brand': brand,
@@ -159,10 +226,10 @@ class ProductImage {
 
   factory ProductImage.fromJson(Map<String, dynamic> json) {
     return ProductImage(
-      id: (json['id'] as num).toInt(),
-      productId: (json['product_id'] as num).toInt(),
-      imageUrl: json['image_url'] as String,
-      createdAt: DateTime.parse(json['created_at'] as String),
+      id: _parseInt(json['id']),
+      productId: _parseInt(json['product_id']),
+      imageUrl: (json['image_url'] ?? '').toString(),
+      createdAt: _parseDateTime(json['created_at']),
     );
   }
 
@@ -279,13 +346,13 @@ class ProductReport {
 
   factory ProductReport.fromJson(Map<String, dynamic> json) {
     return ProductReport(
-      id: (json['id'] as num).toInt(),
-      productId: (json['product_id'] as num).toInt(),
-      reporterId: json['reporter_id'] as String,
-      reason: json['reason'] as String,
+      id: _parseInt(json['id']),
+      productId: _parseInt(json['product_id']),
+      reporterId: (json['reporter_id'] ?? '').toString(),
+      reason: (json['reason'] ?? '').toString(),
       details: json['details'] as String?,
       status: json['status'] as String? ?? 'pending',
-      createdAt: DateTime.parse(json['created_at'] as String),
+      createdAt: _parseDateTime(json['created_at']),
     );
   }
 
@@ -319,11 +386,11 @@ class MarketplaceStats {
 
   factory MarketplaceStats.fromJson(Map<String, dynamic> json) {
     return MarketplaceStats(
-      totalProducts: (json['total_products'] as num).toInt(),
-      activeProducts: (json['active_products'] as num).toInt(),
-      totalViews: (json['total_views'] as num).toInt(),
-      totalLikes: (json['total_likes'] as num).toInt(),
-      totalValue: (json['total_value'] as num).toDouble(),
+      totalProducts: _parseInt(json['total_products']),
+      activeProducts: _parseInt(json['active_products']),
+      totalViews: _parseInt(json['total_views']),
+      totalLikes: _parseInt(json['total_likes']),
+      totalValue: _parseDouble(json['total_value']),
     );
   }
 }

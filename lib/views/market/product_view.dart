@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:juvapay/services/marketplace_service.dart';
 import 'package:juvapay/models/marketplace_models.dart';
-import 'package:juvapay/view_models/wallet_view_model.dart';
-import 'package:juvapay/widgets/loading_overlay.dart';
 import 'package:juvapay/widgets/error_dialog.dart';
 import 'package:juvapay/widgets/success_dialog.dart';
 
@@ -30,9 +30,13 @@ class _ProductViewPageState extends State<ProductViewPage> {
   MarketplaceProduct? _product;
   bool _isLoading = true;
   bool _isLiking = false;
+  bool _isLiked = false;
   String? _errorMessage;
   int _currentImageIndex = 0;
   bool _isReporting = false;
+  bool _isManaging = false;
+  DateTime? _lastLikeTapAt;
+  static const Duration _likeCooldown = Duration(seconds: 3);
 
   @override
   void initState() {
@@ -40,7 +44,7 @@ class _ProductViewPageState extends State<ProductViewPage> {
     _loadProduct();
   }
 
-  Future<void> _loadProduct() async {
+  Future<void> _loadProduct({bool incrementView = true}) async {
     if (!mounted) return;
 
     setState(() {
@@ -64,14 +68,39 @@ class _ProductViewPageState extends State<ProductViewPage> {
         return;
       }
 
+      final isLiked = await _marketplaceService.checkIfProductLiked(product.id);
+      if (!mounted) return;
+
       setState(() {
         _product = product;
+        _isLiked = isLiked;
         _isLoading = false;
       });
 
       // Increment view count
-      if (product.isActive) {
-        await _marketplaceService.incrementProductView(widget.productId);
+      if (incrementView && product.isActive) {
+        final userId = Supabase.instance.client.auth.currentUser?.id;
+        bool didIncrement = false;
+
+        if (userId != null) {
+          didIncrement = await _marketplaceService.incrementProductViewUnique(
+            widget.productId,
+          );
+        } else {
+          didIncrement = await _incrementUniqueView(widget.productId);
+          if (didIncrement) {
+            await _marketplaceService.incrementProductView(widget.productId);
+          }
+        }
+
+        if (didIncrement && mounted) {
+          setState(() {
+            _product = _copyProductWith(
+              product,
+              viewsCount: product.viewsCount + 1,
+            );
+          });
+        }
       }
     } catch (e) {
       if (!mounted) return;
@@ -87,14 +116,31 @@ class _ProductViewPageState extends State<ProductViewPage> {
 
   Future<void> _handleLike() async {
     if (_product == null || _isLiking) return;
+    final now = DateTime.now();
+    if (_lastLikeTapAt != null &&
+        now.difference(_lastLikeTapAt!) < _likeCooldown) {
+      return;
+    }
+    _lastLikeTapAt = now;
 
     setState(() => _isLiking = true);
 
     try {
-      await _marketplaceService.toggleProductLike(_product!.id);
+      await _marketplaceService.toggleProductLike(
+        _product!.id,
+        isLiked: _isLiked,
+      );
 
-      // Refresh product data
-      await _loadProduct();
+      final updatedLikes =
+          _isLiked ? _product!.likesCount - 1 : _product!.likesCount + 1;
+      if (!mounted) return;
+      setState(() {
+        _isLiked = !_isLiked;
+        _product = _copyProductWith(
+          _product!,
+          likesCount: updatedLikes < 0 ? 0 : updatedLikes,
+        );
+      });
     } catch (e) {
       if (!mounted) return;
       await showErrorDialog(
@@ -121,6 +167,9 @@ class _ProductViewPageState extends State<ProductViewPage> {
       "Other",
     ];
 
+    String? selectedReason;
+    final detailsController = TextEditingController();
+
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -131,8 +180,16 @@ class _ProductViewPageState extends State<ProductViewPage> {
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setState) {
-            return Container(
-              padding: const EdgeInsets.all(20),
+            final theme = Theme.of(context);
+            final isOther = selectedReason == "Other";
+
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 20,
+                bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -142,7 +199,7 @@ class _ProductViewPageState extends State<ProductViewPage> {
                     children: [
                       Text(
                         "Report Product",
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        style: theme.textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.bold,
                         ),
                       ),
@@ -152,34 +209,85 @@ class _ProductViewPageState extends State<ProductViewPage> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 8),
                   Text(
-                    "Why are you reporting this product?",
-                    style: Theme.of(context).textTheme.bodyMedium,
+                    "Select a reason and help us improve the marketplace.",
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.hintColor,
+                    ),
                   ),
-                  const SizedBox(height: 20),
-                  Expanded(
+                  const SizedBox(height: 16),
+                  Flexible(
                     child: ListView.separated(
                       shrinkWrap: true,
                       itemCount: reasons.length,
                       separatorBuilder:
                           (context, index) => const Divider(height: 1),
                       itemBuilder: (context, index) {
-                        return ListTile(
-                          title: Text(
-                            reasons[index],
-                            style: Theme.of(context).textTheme.bodyMedium,
-                          ),
-                          trailing: const Icon(Icons.chevron_right, size: 18),
-                          onTap: () async {
-                            Navigator.pop(context);
-                            await _submitReport(reasons[index]);
+                        final reason = reasons[index];
+                        return RadioListTile<String>(
+                          value: reason,
+                          groupValue: selectedReason,
+                          onChanged: (value) {
+                            setState(() => selectedReason = value);
                           },
+                          title: Text(
+                            reason,
+                            style: theme.textTheme.bodyMedium,
+                          ),
                         );
                       },
                     ),
                   ),
-                  const SizedBox(height: 20),
+                  if (isOther) ...[
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: detailsController,
+                      maxLines: 3,
+                      decoration: InputDecoration(
+                        labelText: "Tell us more",
+                        hintText: "Share details to help our team review",
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 46,
+                    child: ElevatedButton(
+                      onPressed:
+                          selectedReason == null
+                              ? null
+                              : () async {
+                                final details =
+                                    detailsController.text.trim().isEmpty
+                                        ? null
+                                        : detailsController.text.trim();
+                                if (selectedReason == "Other" &&
+                                    (details == null || details.isEmpty)) {
+                                  await showErrorDialog(
+                                    context,
+                                    title: 'Add Details',
+                                    message:
+                                        'Please tell us more about this report.',
+                                  );
+                                  return;
+                                }
+                                Navigator.pop(context);
+                                await _submitReport(
+                                  selectedReason!,
+                                  details: details,
+                                );
+                              },
+                      child: const Text(
+                        "Submit Report",
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
                 ],
               ),
             );
@@ -189,7 +297,7 @@ class _ProductViewPageState extends State<ProductViewPage> {
     );
   }
 
-  Future<void> _submitReport(String reason) async {
+  Future<void> _submitReport(String reason, {String? details}) async {
     if (_product == null || _isReporting) return;
 
     setState(() => _isReporting = true);
@@ -198,7 +306,7 @@ class _ProductViewPageState extends State<ProductViewPage> {
       await _marketplaceService.reportProduct(
         productId: _product!.id,
         reason: reason,
-        details: "Reported from mobile app",
+        details: details ?? "Reported from mobile app",
       );
 
       if (!mounted) return;
@@ -219,6 +327,238 @@ class _ProductViewPageState extends State<ProductViewPage> {
     } finally {
       if (mounted) {
         setState(() => _isReporting = false);
+      }
+    }
+  }
+
+  Future<void> _showEditProductDialog() async {
+    if (_product == null || _isManaging) return;
+
+    final product = _product!;
+    final titleController = TextEditingController(text: product.title);
+    final priceController = TextEditingController(
+      text: product.price.toStringAsFixed(0),
+    );
+    final oldPriceController = TextEditingController(
+      text:
+          product.oldPrice == null ? '' : product.oldPrice!.toStringAsFixed(0),
+    );
+    final quantityController = TextEditingController(
+      text: product.quantity.toString(),
+    );
+    final brandController = TextEditingController(text: product.brand ?? '');
+    final descriptionController = TextEditingController(
+      text: product.description,
+    );
+
+    bool isSaving = false;
+    await showDialog(
+      context: context,
+      builder: (context) {
+        final theme = Theme.of(context);
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text("Edit Product"),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: titleController,
+                      decoration: const InputDecoration(labelText: "Title"),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: priceController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(labelText: "Price"),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: oldPriceController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(labelText: "Old Price"),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: quantityController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(labelText: "Quantity"),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: brandController,
+                      decoration: const InputDecoration(labelText: "Brand"),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: descriptionController,
+                      maxLines: 4,
+                      decoration: const InputDecoration(
+                        labelText: "Description",
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: isSaving ? null : () => Navigator.pop(context),
+                  child: const Text("Cancel"),
+                ),
+                ElevatedButton(
+                  onPressed:
+                      isSaving
+                          ? null
+                          : () async {
+                            final title = titleController.text.trim();
+                            final price = double.tryParse(
+                              priceController.text.trim(),
+                            );
+                            final oldPrice = double.tryParse(
+                              oldPriceController.text.trim(),
+                            );
+                            final quantity = int.tryParse(
+                              quantityController.text.trim(),
+                            );
+                            final brand = brandController.text.trim();
+                            final description =
+                                descriptionController.text.trim();
+
+                            if (title.isEmpty ||
+                                price == null ||
+                                price <= 0 ||
+                                quantity == null ||
+                                quantity < 0 ||
+                                description.isEmpty) {
+                              await showErrorDialog(
+                                context,
+                                title: 'Invalid Data',
+                                message:
+                                    'Please provide valid title, price, quantity, and description.',
+                              );
+                              return;
+                            }
+
+                            setDialogState(() => isSaving = true);
+                            setState(() => _isManaging = true);
+
+                            try {
+                              await _marketplaceService.updateProduct(
+                                productId: product.id,
+                                title: title,
+                                price: price,
+                                oldPrice: oldPrice,
+                                quantity: quantity,
+                                brand: brand.isEmpty ? null : brand,
+                                description: description,
+                              );
+
+                              if (!mounted) return;
+                              await showSuccessDialog(
+                                context,
+                                title: 'Updated',
+                                message: 'Product updated successfully.',
+                                icon: Icons.check_circle,
+                              );
+                              Navigator.pop(context);
+                              await _loadProduct(incrementView: false);
+                            } catch (e) {
+                              if (!mounted) return;
+                              await showErrorDialog(
+                                context,
+                                title: 'Error',
+                                message:
+                                    'Failed to update product: ${e.toString()}',
+                              );
+                            } finally {
+                              if (mounted) {
+                                setState(() => _isManaging = false);
+                              }
+                              setDialogState(() => isSaving = false);
+                            }
+                          },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: theme.primaryColor,
+                  ),
+                  child:
+                      isSaving
+                          ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                          : const Text("Save"),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    titleController.dispose();
+    priceController.dispose();
+    oldPriceController.dispose();
+    quantityController.dispose();
+    brandController.dispose();
+    descriptionController.dispose();
+  }
+
+  Future<void> _confirmDeleteProduct() async {
+    if (_product == null || _isManaging) return;
+
+    final product = _product!;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text("Delete Product"),
+          content: const Text(
+            "This will permanently delete the product and its images. This action cannot be undone.",
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text("Cancel"),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              child: const Text("Delete"),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) return;
+
+    setState(() => _isManaging = true);
+    try {
+      await _marketplaceService.deleteProduct(product.id);
+      if (!mounted) return;
+      await showSuccessDialog(
+        context,
+        title: 'Deleted',
+        message: 'Product deleted successfully.',
+        icon: Icons.check_circle,
+      );
+      Navigator.pop(context, true);
+    } catch (e) {
+      if (!mounted) return;
+      await showErrorDialog(
+        context,
+        title: 'Error',
+        message: 'Failed to delete product: ${e.toString()}',
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isManaging = false);
       }
     }
   }
@@ -257,6 +597,27 @@ class _ProductViewPageState extends State<ProductViewPage> {
         message: 'Failed to open WhatsApp: ${e.toString()}',
       );
     }
+  }
+
+  Future<bool> _incrementUniqueView(int productId) async {
+    final userId = Supabase.instance.client.auth.currentUser?.id ?? 'guest';
+    final prefs = await SharedPreferences.getInstance();
+    final key = 'viewed_product_${userId}_$productId';
+    final hasViewed = prefs.getBool(key) ?? false;
+    if (hasViewed) return false;
+    await prefs.setBool(key, true);
+    return true;
+  }
+
+  MarketplaceProduct _copyProductWith(
+    MarketplaceProduct product, {
+    int? viewsCount,
+    int? likesCount,
+  }) {
+    final json = product.toJson();
+    if (viewsCount != null) json['views_count'] = viewsCount;
+    if (likesCount != null) json['likes_count'] = likesCount;
+    return MarketplaceProduct.fromJson(json);
   }
 
   Widget _buildImageCarousel() {
@@ -547,291 +908,396 @@ class _ProductViewPageState extends State<ProductViewPage> {
     final product = _product!;
     final seller = product.seller;
     final theme = Theme.of(context);
-    final sellerPhone = seller?.phoneNumber ?? '';
+    final sellerPhone = seller.phoneNumber ?? '';
+    final currentUserId = Supabase.instance.client.auth.currentUser?.id;
+    final isOwner = currentUserId != null && currentUserId == product.userId;
 
-    return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
-      appBar: AppBar(
-        title: const Text("Product Details"),
-        centerTitle: true,
+    return WillPopScope(
+      onWillPop: () async {
+        Navigator.pop(context, _product);
+        return false;
+      },
+      child: Scaffold(
         backgroundColor: theme.scaffoldBackgroundColor,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.pop(context),
-        ),
-        actions: [
-          _buildSocialIcon(
-            _isLiking ? Icons.favorite : Icons.favorite_border,
-            color: _isLiking ? Colors.red : null,
-            onTap: _handleLike,
+        appBar: AppBar(
+          title: const Text("Product Details"),
+          centerTitle: true,
+          backgroundColor: theme.scaffoldBackgroundColor,
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () => Navigator.pop(context, _product),
           ),
-          const SizedBox(width: 16),
-        ],
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Image Carousel
-                  _buildImageCarousel(),
+          actions: [
+            _buildSocialIcon(
+              _isLiked ? Icons.favorite : Icons.favorite_border,
+              color: _isLiked ? Colors.red : null,
+              onTap: _isLiking ? null : _handleLike,
+            ),
+            const SizedBox(width: 16),
+          ],
+        ),
+        body: Column(
+          children: [
+            Expanded(
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Image Carousel
+                    _buildImageCarousel(),
 
-                  Padding(
-                    padding: const EdgeInsets.all(20.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Category & Brand Tags
-                        Row(
-                          children: [
-                            _buildTag(product.mainCategory, theme.primaryColor),
-                            const SizedBox(width: 8),
-                            if (product.brand != null)
-                              _buildTag(product.brand!, Colors.blueGrey),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
-
-                        // Title
-                        Text(
-                          product.title,
-                          style: theme.textTheme.headlineSmall?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-
-                        // Price & Discount
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.baseline,
-                          textBaseline: TextBaseline.alphabetic,
-                          children: [
-                            Text(
-                              _currencyFormat.format(product.price),
-                              style: theme.textTheme.headlineMedium?.copyWith(
-                                fontWeight: FontWeight.bold,
-                                color: theme.primaryColor,
-                              ),
-                            ),
-                            if (product.hasDiscount) ...[
-                              const SizedBox(width: 12),
-                              Text(
-                                _currencyFormat.format(product.oldPrice!),
-                                style: theme.textTheme.titleMedium?.copyWith(
-                                  color: theme.hintColor,
-                                  decoration: TextDecoration.lineThrough,
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 2,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: Colors.orange.withOpacity(0.15),
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: Text(
-                                  product.formattedDiscount,
-                                  style: const TextStyle(
-                                    color: Colors.orange,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                        const SizedBox(height: 25),
-
-                        // Description
-                        Text(
-                          "DESCRIPTION",
-                          style: theme.textTheme.labelLarge?.copyWith(
-                            color: theme.hintColor,
-                            letterSpacing: 1.2,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          product.description,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            height: 1.5,
-                          ),
-                        ),
-                        const SizedBox(height: 25),
-
-                        // Variations
-                        if (product.availableSizes.isNotEmpty)
-                          _buildVariationList(
-                            "Available Sizes",
-                            product.availableSizes,
-                          ),
-                        if (product.availableColors.isNotEmpty)
-                          _buildVariationList(
-                            "Available Colors",
-                            product.availableColors,
-                          ),
-
-                        const SizedBox(height: 25),
-
-                        // Seller Information
-                        if (seller != null)
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                    Padding(
+                      padding: const EdgeInsets.all(20.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Category & Brand Tags
+                          Row(
                             children: [
-                              Text(
-                                "SELLER INFORMATION",
-                                style: theme.textTheme.labelLarge?.copyWith(
-                                  color: theme.hintColor,
-                                  letterSpacing: 1.2,
-                                ),
+                              _buildTag(
+                                product.mainCategory,
+                                theme.primaryColor,
                               ),
-                              const SizedBox(height: 12),
-                              Row(
+                              const SizedBox(width: 8),
+                              if (product.brand != null)
+                                _buildTag(product.brand!, Colors.blueGrey),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+                          if (isOwner && product.isBanned) ...[
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.red.withOpacity(0.08),
+                                border: Border.all(
+                                  color: Colors.red.withOpacity(0.4),
+                                ),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Row(
                                 children: [
-                                  CircleAvatar(
-                                    radius: 24,
-                                    backgroundColor: theme.primaryColor
-                                        .withOpacity(0.1),
-                                    backgroundImage:
-                                        seller.avatarUrl != null
-                                            ? NetworkImage(seller.avatarUrl!)
-                                            : null,
-                                    child:
-                                        seller.avatarUrl == null
-                                            ? Text(
-                                              seller.fullName[0].toUpperCase(),
-                                              style: TextStyle(
-                                                color: theme.primaryColor,
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            )
-                                            : null,
-                                  ),
-                                  const SizedBox(width: 12),
+                                  const Icon(Icons.block, color: Colors.red),
+                                  const SizedBox(width: 8),
                                   Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          seller.fullName,
-                                          style: theme.textTheme.titleMedium
-                                              ?.copyWith(
-                                                fontWeight: FontWeight.w600,
-                                              ),
-                                        ),
-                                        if (seller.username != null)
-                                          Text(
-                                            '@${seller.username}',
-                                            style: theme.textTheme.bodySmall
-                                                ?.copyWith(
-                                                  color: theme.hintColor,
-                                                ),
+                                    child: Text(
+                                      product.bannedReason == null ||
+                                              product.bannedReason!.isEmpty
+                                          ? "This product has been banned by an admin."
+                                          : "This product has been banned: ${product.bannedReason}.",
+                                      style: theme.textTheme.bodyMedium
+                                          ?.copyWith(
+                                            color: Colors.red,
+                                            fontWeight: FontWeight.w600,
                                           ),
-                                      ],
                                     ),
                                   ),
                                 ],
                               ),
+                            ),
+                            const SizedBox(height: 16),
+                          ],
+
+                          // Title
+                          Text(
+                            product.title,
+                            style: theme.textTheme.headlineSmall?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+
+                          // Price & Discount
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.baseline,
+                            textBaseline: TextBaseline.alphabetic,
+                            children: [
+                              Text(
+                                _currencyFormat.format(product.price),
+                                style: theme.textTheme.headlineMedium?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                  color: theme.primaryColor,
+                                ),
+                              ),
+                              if (product.hasDiscount) ...[
+                                const SizedBox(width: 12),
+                                Text(
+                                  _currencyFormat.format(product.oldPrice!),
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    color: theme.hintColor,
+                                    decoration: TextDecoration.lineThrough,
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.orange.withOpacity(0.15),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    product.formattedDiscount,
+                                    style: const TextStyle(
+                                      color: Colors.orange,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ],
                           ),
+                          const SizedBox(height: 25),
 
-                        const SizedBox(height: 25),
-
-                        // Safety Disclaimer
-                        _buildSafetyDisclaimer(),
-                        const SizedBox(height: 25),
-
-                        // Social Actions
-                        Row(
-                          children: [
-                            _buildSocialIcon(
-                              Icons.share_outlined,
-                              onTap: () {
-                                // TODO: Implement share functionality
-                              },
-                            ),
-                            const SizedBox(width: 20),
-                            _buildSocialIcon(
-                              Icons.report_gmailerrorred_outlined,
-                              color: Colors.red,
-                              onTap: _showReportDialog,
-                            ),
-                            const Spacer(),
-                            Text(
-                              "${product.viewsCount} Views • ${product.likesCount} Likes",
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                fontWeight: FontWeight.bold,
+                          // Quantity Available
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.inventory_2_outlined,
+                                size: 18,
+                                color: theme.hintColor,
                               ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 100),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
+                              const SizedBox(width: 6),
+                              Text(
+                                product.quantity <= 0
+                                    ? "Out of stock"
+                                    : "Quantity Available: ${product.quantity}",
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                  color:
+                                      product.quantity <= 0 ? Colors.red : null,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 20),
 
-          // Persistent Action Buttons
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
-            decoration: BoxDecoration(
-              color: theme.cardColor,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 10,
-                  offset: const Offset(0, -5),
-                ),
-              ],
-            ),
-            child: SafeArea(
-              child: Row(
-                children: [
-                  if (sellerPhone.isNotEmpty) ...[
-                    Expanded(
-                      child: _buildContactButton(
-                        onPressed: () => _makePhoneCall(sellerPhone),
-                        icon: Icons.call,
-                        label: "Call",
-                        color: Colors.blue,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _buildContactButton(
-                        onPressed: () => _openWhatsApp(sellerPhone),
-                        icon: Icons.chat_bubble_outline,
-                        label: "WhatsApp",
-                        color: Colors.green,
-                      ),
-                    ),
-                  ] else ...[
-                    Expanded(
-                      child: Text(
-                        "No contact information available",
-                        textAlign: TextAlign.center,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.hintColor,
-                        ),
+                          // Owner Actions
+                          if (isOwner) ...[
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: OutlinedButton.icon(
+                                    onPressed:
+                                        _isManaging
+                                            ? null
+                                            : _showEditProductDialog,
+                                    icon: const Icon(Icons.edit),
+                                    label: const Text("Edit"),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: OutlinedButton.icon(
+                                    onPressed:
+                                        _isManaging
+                                            ? null
+                                            : _confirmDeleteProduct,
+                                    icon: const Icon(Icons.delete_outline),
+                                    label: const Text("Delete"),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: Colors.red,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 25),
+                          ],
+
+                          // Description
+                          Text(
+                            "DESCRIPTION",
+                            style: theme.textTheme.labelLarge?.copyWith(
+                              color: theme.hintColor,
+                              letterSpacing: 1.2,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            product.description,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              height: 1.5,
+                            ),
+                          ),
+                          const SizedBox(height: 25),
+
+                          // Variations
+                          if (product.availableSizes.isNotEmpty)
+                            _buildVariationList(
+                              "Available Sizes",
+                              product.availableSizes,
+                            ),
+                          if (product.availableColors.isNotEmpty)
+                            _buildVariationList(
+                              "Available Colors",
+                              product.availableColors,
+                            ),
+
+                          const SizedBox(height: 25),
+
+                          // Seller Information
+                          if (seller != null)
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  "SELLER INFORMATION",
+                                  style: theme.textTheme.labelLarge?.copyWith(
+                                    color: theme.hintColor,
+                                    letterSpacing: 1.2,
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                Row(
+                                  children: [
+                                    CircleAvatar(
+                                      radius: 24,
+                                      backgroundColor: theme.primaryColor
+                                          .withOpacity(0.1),
+                                      backgroundImage:
+                                          seller.avatarUrl != null
+                                              ? NetworkImage(seller.avatarUrl!)
+                                              : null,
+                                      child:
+                                          seller.avatarUrl == null
+                                              ? Text(
+                                                seller.fullName[0]
+                                                    .toUpperCase(),
+                                                style: TextStyle(
+                                                  color: theme.primaryColor,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              )
+                                              : null,
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            seller.fullName,
+                                            style: theme.textTheme.titleMedium
+                                                ?.copyWith(
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                          ),
+                                          if (seller.username != null)
+                                            Text(
+                                              '@${seller.username}',
+                                              style: theme.textTheme.bodySmall
+                                                  ?.copyWith(
+                                                    color: theme.hintColor,
+                                                  ),
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+
+                          const SizedBox(height: 25),
+
+                          // Safety Disclaimer
+                          _buildSafetyDisclaimer(),
+                          const SizedBox(height: 25),
+
+                          // Social Actions
+                          Row(
+                            children: [
+                              _buildSocialIcon(
+                                Icons.share_outlined,
+                                onTap: () {
+                                  final deepLink =
+                                      "juvapay://product?id=${product.id}";
+                                  final shareText =
+                                      "Check out ${product.title} on JuvaPay for ${_currencyFormat.format(product.price)}.\n$deepLink";
+                                  Share.share(shareText);
+                                },
+                              ),
+                              const SizedBox(width: 20),
+                              _buildSocialIcon(
+                                Icons.report_gmailerrorred_outlined,
+                                color: Colors.red,
+                                onTap: _showReportDialog,
+                              ),
+                              const Spacer(),
+                              Text(
+                                "${product.viewsCount} Views • ${product.likesCount} Likes",
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 100),
+                        ],
                       ),
                     ),
                   ],
-                ],
+                ),
               ),
             ),
-          ),
-        ],
+
+            // Persistent Action Buttons
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+              decoration: BoxDecoration(
+                color: theme.cardColor,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.05),
+                    blurRadius: 10,
+                    offset: const Offset(0, -5),
+                  ),
+                ],
+              ),
+              child: SafeArea(
+                child: Row(
+                  children: [
+                    if (sellerPhone.isNotEmpty) ...[
+                      Expanded(
+                        child: _buildContactButton(
+                          onPressed: () => _makePhoneCall(sellerPhone),
+                          icon: Icons.call,
+                          label: "Call",
+                          color: Colors.blue,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _buildContactButton(
+                          onPressed: () => _openWhatsApp(sellerPhone),
+                          icon: Icons.chat_bubble_outline,
+                          label: "WhatsApp",
+                          color: Colors.green,
+                        ),
+                      ),
+                    ] else ...[
+                      Expanded(
+                        child: Text(
+                          "No contact information available",
+                          textAlign: TextAlign.center,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.hintColor,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

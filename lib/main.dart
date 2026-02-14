@@ -25,6 +25,7 @@ import 'view_models/home_view_model.dart';
 import 'views/onboarding/onboarding_view.dart';
 import 'views/auth/reset_password_page.dart';
 import 'widgets/app_bottom_navbar.dart';
+import 'views/market/product_view.dart';
 
 // Error Boundary
 import 'widgets/error_boundary.dart';
@@ -223,6 +224,8 @@ class _JuvaPayAppState extends State<JuvaPayApp> with WidgetsBindingObserver {
       // Check if it's an email verification link
       else if (uri.toString().contains('verify-email')) {
         await _handleEmailVerificationLink(uri);
+      } else if (_isProductDeepLink(uri)) {
+        await _handleProductDeepLink(uri);
       } else {
         print('⚠️ Unknown deep link type: ${uri.toString()}');
       }
@@ -260,6 +263,40 @@ class _JuvaPayAppState extends State<JuvaPayApp> with WidgetsBindingObserver {
     }
 
     print('✅ Password reset link handled');
+  }
+
+  bool _isProductDeepLink(Uri uri) {
+    if (uri.scheme == 'juvapay' && uri.host == 'product') return true;
+    if (uri.pathSegments.isNotEmpty && uri.pathSegments.first == 'product') {
+      return true;
+    }
+    return false;
+  }
+
+  Future<void> _handleProductDeepLink(Uri uri) async {
+    try {
+      String? idParam = uri.queryParameters['id'];
+      if (idParam == null && uri.pathSegments.length >= 2) {
+        idParam = uri.pathSegments[1];
+      }
+
+      final productId = int.tryParse(idParam ?? '');
+      if (productId == null) {
+        print('⚠️ Product deep link missing/invalid id: ${uri.toString()}');
+        return;
+      }
+
+      if (_navigatorKey.currentState != null && mounted) {
+        _navigatorKey.currentState!.push(
+          MaterialPageRoute(
+            builder: (context) => ProductViewPage(productId: productId),
+            settings: const RouteSettings(name: '/product'),
+          ),
+        );
+      }
+    } catch (error) {
+      print('❌ Product deep link handling failed: $error');
+    }
   }
 
   Future<void> _handleEmailVerificationLink(Uri uri) async {

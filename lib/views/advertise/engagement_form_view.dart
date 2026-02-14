@@ -1,6 +1,8 @@
 // views/advertise/engagement_form_view.dart
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../services/supabase_auth_service.dart';
 import '../../services/state_service.dart';
@@ -9,6 +11,7 @@ import '../../models/location_models.dart';
 import '../../utils/platform_helper.dart';
 import '../../utils/task_helper.dart';
 import '../../utils/form_field_helper.dart';
+import '../../utils/transaction_context.dart';
 import '../settings/subpages/fund_wallet_view.dart';
 
 class EngagementFormPage extends StatefulWidget {
@@ -32,6 +35,8 @@ class _EngagementFormPageState extends State<EngagementFormPage> {
   final TextEditingController _linkController = TextEditingController();
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _captionController = TextEditingController();
+  final ImagePicker _picker = ImagePicker();
+  File? _selectedImageFile;
 
   late final SupabaseAuthService _authService;
   late final StateService _stateService;
@@ -54,6 +59,7 @@ class _EngagementFormPageState extends State<EngagementFormPage> {
     _authService = SupabaseAuthService();
     _stateService = StateService();
     _totalPrice = widget.task.price * widget.quantity;
+    _captionController.text = '';
     _loadInitialData();
   }
 
@@ -104,6 +110,7 @@ class _EngagementFormPageState extends State<EngagementFormPage> {
     setState(() => _isLoading = true);
 
     try {
+      final txContext = await TransactionContext.fetch();
       final result = await _authService.createAdvertiserOrder(
         taskId: widget.task.id,
         platform: widget.platform,
@@ -128,11 +135,30 @@ class _EngagementFormPageState extends State<EngagementFormPage> {
           'task_type': 'engagement',
           'engagement_type': _getEngagementType(widget.task),
         },
+        ipAddress: txContext.ipAddress,
+        userAgent: txContext.userAgent,
+        deviceId: txContext.deviceId,
+        location: txContext.location,
       );
 
       debugPrint('Order creation result: $result');
 
       if (result['success'] == true) {
+        final orderId = result['order_id']?.toString();
+        if (orderId != null &&
+            orderId.isNotEmpty &&
+            _selectedImageFile != null) {
+          final uploadResult = await _authService.uploadOrderMediaFiles(
+            orderId: orderId,
+            mediaFiles: [_selectedImageFile!],
+          );
+          if (uploadResult['success'] != true && mounted) {
+            _showError(
+              uploadResult['message']?.toString() ??
+                  'Order created, but image upload failed.',
+            );
+          }
+        }
         _showSuccessDialog();
       } else {
         // Show detailed error message
@@ -146,8 +172,6 @@ class _EngagementFormPageState extends State<EngagementFormPage> {
           _showWalletLockedDialog(errorMessage);
         } else if (errorMessage.contains('Task not found')) {
           _showError('The selected task is no longer available.');
-        } else if (errorMessage.contains('payment')) {
-          _showError('Payment processing failed. Please try again.');
         } else {
           _showError(errorMessage);
         }
@@ -167,6 +191,20 @@ class _EngagementFormPageState extends State<EngagementFormPage> {
       _showError('Failed to submit order: ${e.toString()}');
     } finally {
       if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _pickEngagementImage() async {
+    try {
+      final picked = await _picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 85,
+        maxWidth: 1920,
+      );
+      if (picked == null) return;
+      setState(() => _selectedImageFile = File(picked.path));
+    } catch (e) {
+      _showError('Failed to pick image: ${e.toString()}');
     }
   }
 
@@ -404,6 +442,8 @@ class _EngagementFormPageState extends State<EngagementFormPage> {
                     _buildUsernameSection(colorScheme, textTheme),
                     const SizedBox(height: 20),
                     _buildCaptionSection(colorScheme, textTheme),
+                    const SizedBox(height: 20),
+                    _buildImageSection(colorScheme, textTheme),
                     const SizedBox(height: 20),
                     _buildLocationSection(colorScheme, textTheme),
                     const SizedBox(height: 40),
@@ -923,6 +963,42 @@ class _EngagementFormPageState extends State<EngagementFormPage> {
             ),
           ],
         ),
+      ],
+    );
+  }
+
+  Widget _buildImageSection(ColorScheme colorScheme, TextTheme textTheme) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Image (Optional)',
+          style: GoogleFonts.inter(
+            fontWeight: FontWeight.w600,
+            fontSize: 14,
+            color: colorScheme.onSurface,
+          ),
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: _pickEngagementImage,
+          icon: const Icon(Icons.image_outlined),
+          label: Text(
+            _selectedImageFile == null ? 'Upload Image' : 'Change Image',
+          ),
+        ),
+        if (_selectedImageFile != null) ...[
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: Image.file(
+              _selectedImageFile!,
+              height: 120,
+              width: double.infinity,
+              fit: BoxFit.cover,
+            ),
+          ),
+        ],
       ],
     );
   }

@@ -12,6 +12,15 @@ class MarketplaceService {
 
   final SupabaseClient _supabase = Supabase.instance.client;
   static const String _storageBucket = 'marketplace-images';
+  static const String _productSelectWithProfiles = '''
+          *,
+          marketplace_product_images(*),
+          profiles!marketplace_products_user_id_fkey(*)
+        ''';
+  static const String _productSelectWithoutProfiles = '''
+          *,
+          marketplace_product_images(*)
+        ''';
 
   // ==========================================
   // 1. PRODUCT MANAGEMENT
@@ -164,66 +173,60 @@ class MarketplaceService {
       debugPrint('  Sort: $sortBy');
       debugPrint('  Limit: $limit, Offset: $offset');
 
-      // Build base query - use dynamic type to handle different builder types
-      dynamic query = _supabase
-          .from('marketplace_products')
-          .select('''
-          *,
-          marketplace_product_images(*),
-          profiles!marketplace_products_user_id_fkey(*)
-        ''')
-          .eq('status', 'ACTIVE');
-
-      // Apply filters
-      if (category != null && category.isNotEmpty) {
-        query = query.eq('main_category', category);
+      List<dynamic> response;
+      try {
+        response = await _fetchProductsRaw(
+          select: _productSelectWithProfiles,
+          category: category,
+          stateId: stateId,
+          lgaId: lgaId,
+          minPrice: minPrice,
+          maxPrice: maxPrice,
+          searchQuery: searchQuery,
+          sortBy: sortBy,
+          ascending: ascending,
+          limit: limit,
+          offset: offset,
+        );
+      } on PostgrestException catch (e) {
+        debugPrint(
+          'Primary product query failed, retrying without profiles: ${e.message}',
+        );
+        response = await _fetchProductsRaw(
+          select: _productSelectWithoutProfiles,
+          category: category,
+          stateId: stateId,
+          lgaId: lgaId,
+          minPrice: minPrice,
+          maxPrice: maxPrice,
+          searchQuery: searchQuery,
+          sortBy: sortBy,
+          ascending: ascending,
+          limit: limit,
+          offset: offset,
+        );
       }
-
-      if (stateId != null) {
-        query = query.eq('state_id', stateId);
-      }
-
-      if (lgaId != null) {
-        query = query.eq('lga_id', lgaId);
-      }
-
-      if (minPrice != null) {
-        query = query.gte('price', minPrice);
-      }
-
-      if (maxPrice != null) {
-        query = query.lte('price', maxPrice);
-      }
-
-      if (searchQuery != null && searchQuery.isNotEmpty) {
-        query = query.ilike('title', '%$searchQuery%');
-      }
-
-      // Apply sorting - this changes the type from FilterBuilder to TransformBuilder
-      switch (sortBy) {
-        case 'price':
-          query = query.order('price', ascending: ascending);
-          break;
-        case 'views':
-          query = query.order('views_count', ascending: ascending);
-          break;
-        case 'likes':
-          query = query.order('likes_count', ascending: ascending);
-          break;
-        default:
-          query = query.order('created_at', ascending: ascending);
-      }
-
-      // Apply pagination
-      final response = await query
-          .range(offset, offset + limit - 1)
-          .timeout(const Duration(seconds: 10));
 
       debugPrint('Raw response from Supabase: ${response.length} items');
 
+      final productsJson = List<Map<String, dynamic>>.from(response as List);
+
+      // Hydrate seller profile if the join failed or is missing
+      await Future.wait(
+        productsJson.map((json) async {
+          if (json['profiles'] != null) return;
+          final userId = (json['user_id'] ?? '').toString();
+          if (userId.isEmpty) return;
+          final profile = await _fetchProfileByUserId(userId);
+          if (profile != null) {
+            json['profiles'] = profile;
+          }
+        }),
+      );
+
       // Parse response
       final products =
-          (response as List)
+          productsJson
               .map((json) {
                 try {
                   return MarketplaceProduct.fromJson(json);
@@ -242,27 +245,42 @@ class MarketplaceService {
       return products;
     } on TimeoutException catch (e) {
       debugPrint('Timeout loading products: $e');
-      return [];
+      rethrow;
     } catch (e) {
       debugPrint('Error loading products: $e');
-      return [];
+      rethrow;
     }
   }
 
   Future<MarketplaceProduct?> getProductById(int productId) async {
     try {
-      final response = await _supabase
-          .from('marketplace_products')
-          .select('''
-            *,
-            marketplace_product_images(*),
-            profiles!inner(*)
-          ''')
-          .eq('id', productId)
-          .maybeSingle()
-          .timeout(const Duration(seconds: 10));
+      Map<String, dynamic>? response;
+      try {
+        response = await _fetchProductByIdRaw(
+          select: _productSelectWithProfiles,
+          productId: productId,
+        );
+      } on PostgrestException catch (e) {
+        debugPrint(
+          'Primary productById query failed, retrying without profiles: ${e.message}',
+        );
+        response = await _fetchProductByIdRaw(
+          select: _productSelectWithoutProfiles,
+          productId: productId,
+        );
+      }
 
       if (response == null) return null;
+
+      if (response['profiles'] == null) {
+        final userId = (response['user_id'] ?? '').toString();
+        if (userId.isNotEmpty) {
+          final profile = await _fetchProfileByUserId(userId);
+          if (profile != null) {
+            response['profiles'] = profile;
+          }
+        }
+      }
       return MarketplaceProduct.fromJson(response);
     } on TimeoutException {
       throw Exception('Product request timed out');
@@ -270,6 +288,85 @@ class MarketplaceService {
       debugPrint('Error getting product by ID: $e');
       return null;
     }
+  }
+
+  Future<List<dynamic>> _fetchProductsRaw({
+    required String select,
+    String? category,
+    int? stateId,
+    int? lgaId,
+    double? minPrice,
+    double? maxPrice,
+    String? searchQuery,
+    required String sortBy,
+    required bool ascending,
+    required int limit,
+    required int offset,
+  }) async {
+    dynamic query = _supabase
+        .from('marketplace_products')
+        .select(select)
+        .eq('status', 'ACTIVE');
+    query = query.eq('is_banned', false);
+
+    if (category != null && category.isNotEmpty) {
+      query = query.eq('main_category', category);
+    }
+
+    if (stateId != null) {
+      query = query.eq('state_id', stateId);
+    }
+
+    if (lgaId != null) {
+      query = query.eq('lga_id', lgaId);
+    }
+
+    if (minPrice != null) {
+      query = query.gte('price', minPrice);
+    }
+
+    if (maxPrice != null) {
+      query = query.lte('price', maxPrice);
+    }
+
+    if (searchQuery != null && searchQuery.isNotEmpty) {
+      query = query.ilike('title', '%$searchQuery%');
+    }
+
+    switch (sortBy) {
+      case 'price':
+        query = query.order('price', ascending: ascending);
+        break;
+      case 'views':
+        query = query.order('views_count', ascending: ascending);
+        break;
+      case 'likes':
+        query = query.order('likes_count', ascending: ascending);
+        break;
+      default:
+        query = query.order('created_at', ascending: ascending);
+    }
+
+    final response = await query
+        .range(offset, offset + limit - 1)
+        .timeout(const Duration(seconds: 10));
+
+    return response as List<dynamic>;
+  }
+
+  Future<Map<String, dynamic>?> _fetchProductByIdRaw({
+    required String select,
+    required int productId,
+  }) async {
+    final response = await _supabase
+        .from('marketplace_products')
+        .select(select)
+        .eq('id', productId)
+        .maybeSingle()
+        .timeout(const Duration(seconds: 10));
+
+    if (response == null) return null;
+    return response as Map<String, dynamic>;
   }
 
   Future<void> incrementProductView(int productId) async {
@@ -283,6 +380,35 @@ class MarketplaceService {
     } catch (e) {
       debugPrint('Error incrementing product view: $e');
       // Silently fail - view counting isn't critical
+    }
+  }
+
+  Future<bool> incrementProductViewUnique(int productId) async {
+    try {
+      final response =
+          await _supabase
+              .rpc(
+                'increment_product_view_unique',
+                params: {'product_id_input': productId},
+              )
+              .timeout(const Duration(seconds: 5));
+
+      if (response is bool) return response;
+      if (response is Map && response['incremented'] is bool) {
+        return response['incremented'] as bool;
+      }
+      return false;
+    } on PostgrestException catch (e) {
+      if (e.code == 'PGRST202') {
+        // RPC missing - fall back to non-unique counter
+        await incrementProductView(productId);
+        return true;
+      }
+      debugPrint('Error incrementing unique view: ${e.message}');
+      return false;
+    } catch (e) {
+      debugPrint('Error incrementing unique view: $e');
+      return false;
     }
   }
 
@@ -327,7 +453,7 @@ class MarketplaceService {
     try {
       await _supabase
           .from('marketplace_products')
-          .update({'status': 'DELETED'})
+          .delete()
           .eq('id', productId)
           .eq('user_id', user.id)
           .timeout(const Duration(seconds: 10));
@@ -432,21 +558,15 @@ class MarketplaceService {
   // 4. PRODUCT INTERACTIONS
   // ==========================================
 
-  Future<void> toggleProductLike(int productId) async {
+  Future<void> toggleProductLike(
+    int productId, {
+    required bool isLiked,
+  }) async {
     final user = _supabase.auth.currentUser;
     if (user == null) throw Exception('User not authenticated');
 
     try {
-      // Check if already liked
-      final existingLike =
-          await _supabase
-              .from('product_likes')
-              .select()
-              .eq('product_id', productId)
-              .eq('user_id', user.id)
-              .maybeSingle();
-
-      if (existingLike != null) {
+      if (isLiked) {
         // Unlike
         await _supabase
             .from('product_likes')
@@ -454,21 +574,43 @@ class MarketplaceService {
             .eq('product_id', productId)
             .eq('user_id', user.id);
 
-        await _supabase.rpc(
-          'decrement_product_likes',
-          params: {'product_id_input': productId},
-        );
+        try {
+          await _supabase.rpc(
+            'decrement_product_likes',
+            params: {'product_id_input': productId},
+          );
+        } catch (e) {
+          try {
+            await _applyLikesCountDelta(productId, -1);
+          } catch (updateError) {
+            debugPrint('Failed to decrement likes count: $updateError');
+          }
+        }
       } else {
         // Like
-        await _supabase.from('product_likes').insert({
-          'product_id': productId,
-          'user_id': user.id,
-        });
+        try {
+          await _supabase.from('product_likes').insert({
+            'product_id': productId,
+            'user_id': user.id,
+          });
+        } on PostgrestException catch (e) {
+          // Ignore duplicate likes to avoid bubbling errors to the UI.
+          if (e.code == '23505') return;
+          rethrow;
+        }
 
-        await _supabase.rpc(
-          'increment_product_likes',
-          params: {'product_id_input': productId},
-        );
+        try {
+          await _supabase.rpc(
+            'increment_product_likes',
+            params: {'product_id_input': productId},
+          );
+        } catch (e) {
+          try {
+            await _applyLikesCountDelta(productId, 1);
+          } catch (updateError) {
+            debugPrint('Failed to increment likes count: $updateError');
+          }
+        }
       }
     } catch (e) {
       debugPrint('Error toggling product like: $e');
@@ -494,6 +636,45 @@ class MarketplaceService {
       debugPrint('Error checking product like: $e');
       return false;
     }
+  }
+
+  Future<Map<String, dynamic>?> _fetchProfileByUserId(String userId) async {
+    try {
+      final response =
+          await _supabase
+              .from('profiles')
+              .select()
+              .eq('id', userId)
+              .maybeSingle()
+              .timeout(const Duration(seconds: 5));
+
+      if (response == null) return null;
+      return response as Map<String, dynamic>;
+    } catch (e) {
+      debugPrint('Error fetching profile for user $userId: $e');
+      return null;
+    }
+  }
+
+  Future<void> _applyLikesCountDelta(int productId, int delta) async {
+    final response =
+        await _supabase
+            .from('marketplace_products')
+            .select('likes_count')
+            .eq('id', productId)
+            .maybeSingle()
+            .timeout(const Duration(seconds: 5));
+
+    final current =
+        response == null ? 0 : (response['likes_count'] as num? ?? 0).toInt();
+    final next = current + delta;
+    final safeNext = next < 0 ? 0 : next;
+
+    await _supabase
+        .from('marketplace_products')
+        .update({'likes_count': safeNext})
+        .eq('id', productId)
+        .timeout(const Duration(seconds: 5));
   }
 
   // ==========================================

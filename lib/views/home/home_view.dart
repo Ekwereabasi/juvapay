@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:juvapay/services/supabase_auth_service.dart';
+import 'package:juvapay/services/task_service.dart';
 import '../../view_models/home_view_model.dart';
 import '../../view_models/wallet_view_model.dart';
 import '../../services/wallet_service.dart';
@@ -17,9 +18,12 @@ import '../../views/settings/subpages/fund_wallet_view.dart';
 import '../../views/settings/subpages/place_withdrawal_view.dart';
 import '../../views/earn/earn_view.dart';
 import '../../views/advertise/advert_upload_page.dart';
+import '../../views/earn/task_execution_view.dart';
 
 class HomeView extends StatelessWidget {
   const HomeView({super.key});
+  static final SupabaseAuthService _authService = SupabaseAuthService();
+  static final TaskService _taskService = TaskService();
 
   @override
   Widget build(BuildContext context) {
@@ -768,29 +772,36 @@ class HomeView extends StatelessWidget {
       return;
     }
 
-    // You'll need to implement the claim logic here
-    // This would typically call SupabaseAuthService.claimTask()
-    showDialog(
-      context: context,
-      builder:
-          (context) => AlertDialog(
-            title: const Text('Claim Task'),
-            content: const Text('Redirecting to task execution...'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Cancel'),
-              ),
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(context);
-                  // Navigate to task execution
-                  // Navigator.push(context, MaterialPageRoute(builder: (context) => TaskExecutionScreen(taskData: task)));
-                },
-                child: const Text('Continue'),
-              ),
-            ],
-          ),
+    final result = await _authService.claimTask(queueId);
+    if (result['success'] != true) {
+      final message = result['message']?.toString() ?? 'Failed to claim task';
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message), backgroundColor: Colors.red),
+      );
+      return;
+    }
+
+    final assignmentId = result['assignment_id']?.toString();
+    final details = await _taskService.getTaskExecutionDetails(
+      assignmentId: assignmentId,
+      queueId: queueId,
+      fallbackTaskData: {
+        ...task,
+        'assignment_id': assignmentId,
+        'queue_id': queueId,
+      },
+    );
+    final taskData =
+        details ??
+        {...task, 'assignment_id': assignmentId, 'queue_id': queueId};
+
+    if (!context.mounted) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => TaskExecutionScreen(taskData: taskData),
+      ),
     );
   }
 

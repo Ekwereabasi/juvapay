@@ -7,7 +7,7 @@ import 'package:juvapay/services/state_service.dart';
 import 'package:juvapay/models/marketplace_models.dart';
 import 'package:juvapay/models/location_models.dart';
 import 'package:juvapay/views/market/product_view.dart';
-import 'package:juvapay/widgets/market_product_card.dart';
+import 'package:juvapay/views/market/market_product_card.dart';
 import 'package:juvapay/widgets/loading_indicator.dart';
 import 'package:juvapay/widgets/error_state.dart';
 import 'package:juvapay/views/market/marketplace_upload_page.dart';
@@ -493,7 +493,7 @@ class _MarketViewState extends State<MarketView> {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
-        childAspectRatio: 0.62,
+        childAspectRatio: 0.60,
         crossAxisSpacing: 12,
         mainAxisSpacing: 12,
       ),
@@ -512,13 +512,19 @@ class _MarketViewState extends State<MarketView> {
         final product = _products[index];
         return MarketProductCard(
           product: product,
-          onTap: () {
-            Navigator.push(
+          onTap: () async {
+            final updated = await Navigator.push(
               context,
               MaterialPageRoute(
                 builder: (context) => ProductViewPage(productId: product.id),
               ),
             );
+            if (!mounted) return;
+            if (updated is MarketplaceProduct) {
+              setState(() => _products[index] = updated);
+            } else if (updated == true) {
+              _loadProducts(refresh: true);
+            }
           },
         );
       },
@@ -562,7 +568,11 @@ Widget build(BuildContext context) {
                 MaterialPageRoute(
                   builder: (context) => const MarketplaceUploadPage(),
                 ),
-              );
+              ).then((result) {
+                if (result == true) {
+                  _loadProducts(refresh: true);
+                }
+              });
             },
           ),
         ],
@@ -584,7 +594,11 @@ Widget build(BuildContext context) {
                     MaterialPageRoute(
                       builder: (context) => const MarketplaceUploadPage(),
                     ),
-                  );
+                  ).then((result) {
+                    if (result == true) {
+                      _loadProducts(refresh: true);
+                    }
+                  });
                 },
                 isMarketplace: true,
               )

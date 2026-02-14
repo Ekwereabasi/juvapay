@@ -8,6 +8,7 @@ import 'package:lottie/lottie.dart';
 
 import '../../../services/wallet_service.dart';
 import '../../../services/supabase_auth_service.dart';
+import '../../../utils/transaction_context.dart';
 
 class FundWalletScreen extends StatefulWidget {
   const FundWalletScreen({super.key});
@@ -157,13 +158,14 @@ class _FundWalletScreenState extends State<FundWalletScreen> {
       };
 
       // Process deposit in our system using the correct method name
+      final txContext = await TransactionContext.fetch();
       final depositResult = await _walletService.processDeposit(
         amount: amount,
         referenceId: txRef,
         gatewayResponse: gatewayResponse,
-        ipAddress: null,
-        userAgent: null,
-        deviceId: null,
+        ipAddress: txContext.ipAddress,
+        userAgent: txContext.userAgent,
+        deviceId: txContext.deviceId,
       );
 
       debugPrint('Deposit Result: $depositResult');

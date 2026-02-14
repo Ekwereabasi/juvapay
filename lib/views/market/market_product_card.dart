@@ -26,13 +26,12 @@ class MarketProductCard extends StatelessWidget {
     final String title = product.title;
     final int likes = product.likesCount;
     final int views = product.viewsCount;
+    final bool isOutOfStock = product.quantity <= 0;
 
     // Get first image or placeholder
     final List<ProductImage> images = product.images;
     final String imageUrl =
-        images.isNotEmpty
-            ? images[0].imageUrl
-            : 'https://via.placeholder.com/150';
+        images.isNotEmpty ? images[0].imageUrl : 'https://via.placeholder.com/150';
 
     // Calculate Discount %
     int discountPercent = 0;
@@ -50,49 +49,81 @@ class MarketProductCard extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Image Section
-            Expanded(
-              child: ClipRRect(
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(8),
-                ),
-                child: Image.network(
-                  imageUrl,
-                  width: double.infinity,
-                  fit: BoxFit.cover,
-                  loadingBuilder: (context, child, loadingProgress) {
-                    if (loadingProgress == null) return child;
-                    return Center(
-                      child: CircularProgressIndicator(
-                        value:
-                            loadingProgress.expectedTotalBytes != null
-                                ? loadingProgress.cumulativeBytesLoaded /
-                                    loadingProgress.expectedTotalBytes!
-                                : null,
-                      ),
-                    );
-                  },
-                  errorBuilder:
-                      (c, e, s) => Container(
-                        color: theme.canvasColor,
-                        child: Icon(
-                          Icons.broken_image,
-                          color: theme.iconTheme.color?.withOpacity(0.3),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Image Section
+              Flexible(
+                flex: 5,
+                child: ClipRRect(
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(8),
+                  ),
+                  child: Stack(
+                    children: [
+                      Image.network(
+                        imageUrl,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                        loadingBuilder: (context, child, loadingProgress) {
+                          if (loadingProgress == null) return child;
+                          return Center(
+                            child: CircularProgressIndicator(
+                              value:
+                                  loadingProgress.expectedTotalBytes != null
+                                      ? loadingProgress.cumulativeBytesLoaded /
+                                          loadingProgress.expectedTotalBytes!
+                                      : null,
+                            ),
+                          );
+                        },
+                        errorBuilder: (c, e, s) => Container(
+                          color: theme.canvasColor,
+                          child: Icon(
+                            Icons.broken_image,
+                            color: theme.iconTheme.color?.withOpacity(0.3),
+                          ),
                         ),
                       ),
+                      if (isOutOfStock)
+                        Positioned(
+                          top: 8,
+                          left: 8,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 3,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.red.withOpacity(0.9),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: const Text(
+                              "Out of stock",
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
               ),
-            ),
 
-            // Content Section
-            Padding(
-              padding: const EdgeInsets.all(10.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
+              // Content Section
+              Flexible(
+                flex: 8,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12.0,
+                    vertical: 10.0,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
                   // Category Tag
                   Container(
                     padding: const EdgeInsets.symmetric(
@@ -124,37 +155,37 @@ class MarketProductCard extends StatelessWidget {
                       ],
                     ),
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 8),
 
                   // Title
                   Text(
                     title,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                      height: 1.2,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      height: 1.15,
                     ),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 6),
 
                   // "More Details" Link
                   Text(
-                    "More Details ↗",
+                    "More Details \u2197",
                     style: TextStyle(
                       color: theme.primaryColor,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 10),
 
                   // Price Row
                   Text(
                     formatCurrency.format(price),
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 18,
                     ),
                   ),
 
@@ -203,46 +234,23 @@ class MarketProductCard extends StatelessWidget {
                       Text(
                         "$likes Likes",
                         style: theme.textTheme.bodySmall?.copyWith(
-                          fontWeight: FontWeight.bold,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                       Text(
-                        "${(views / 1000).toStringAsFixed(1)}k Views",
+                        "$views Views",
                         style: theme.textTheme.bodySmall?.copyWith(
-                          fontWeight: FontWeight.bold,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     ],
                   ),
 
-                  const SizedBox(height: 10),
-
-                  // Button
-                  SizedBox(
-                    width: double.infinity,
-                    height: 36,
-                    child: OutlinedButton(
-                      onPressed: onTap,
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: theme.primaryColor,
-                        side: BorderSide(color: theme.dividerColor),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                      ),
-                      child: const Text(
-                        "VIEW PRODUCT",
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ),
                 ],
               ),
             ),
-          ],
+            ),
+          ]
         ),
       ),
     );

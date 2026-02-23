@@ -12,6 +12,7 @@ import 'dart:async';
 import 'services/theme_service.dart';
 import 'services/cache_service.dart';
 import 'services/network_service.dart';
+import 'services/notification_event_listener_service.dart';
 
 // Utils
 import 'utils/app_themes.dart';
@@ -103,6 +104,7 @@ class JuvaPayApp extends StatefulWidget {
 class _JuvaPayAppState extends State<JuvaPayApp> with WidgetsBindingObserver {
   late CacheService _cacheService;
   late NetworkService _networkService;
+  NotificationEventListenerService? _notificationEventListenerService;
 
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   late AppLinks _appLinks;
@@ -133,6 +135,7 @@ class _JuvaPayAppState extends State<JuvaPayApp> with WidgetsBindingObserver {
 
       // Initialize services
       await _initializeServices();
+      _initializeNotificationEvents();
 
       print("✅ All services initialized successfully");
 
@@ -177,6 +180,18 @@ class _JuvaPayAppState extends State<JuvaPayApp> with WidgetsBindingObserver {
       print("❌ Service initialization failed: $error");
       print("Stack trace: $stackTrace");
       // Don't rethrow - we want to show the app even if services fail
+    }
+  }
+
+  void _initializeNotificationEvents() {
+    if (!widget.initializeSupabase) return;
+    try {
+      _notificationEventListenerService = NotificationEventListenerService(
+        Supabase.instance.client,
+      )..initialize();
+      print("✅ Notification event listener initialized");
+    } catch (e) {
+      print("⚠️ Notification event listener failed to initialize: $e");
     }
   }
 
@@ -393,6 +408,7 @@ class _JuvaPayAppState extends State<JuvaPayApp> with WidgetsBindingObserver {
       _cacheService.close();
       _networkService.dispose();
     }
+    unawaited(_notificationEventListenerService?.stop());
 
     super.dispose();
   }

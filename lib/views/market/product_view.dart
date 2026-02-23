@@ -8,6 +8,7 @@ import 'package:juvapay/services/marketplace_service.dart';
 import 'package:juvapay/models/marketplace_models.dart';
 import 'package:juvapay/widgets/error_dialog.dart';
 import 'package:juvapay/widgets/success_dialog.dart';
+import 'package:juvapay/widgets/error_state.dart';
 
 class ProductViewPage extends StatefulWidget {
   final int productId;
@@ -819,49 +820,7 @@ class _ProductViewPageState extends State<ProductViewPage> {
   }
 
   Widget _buildErrorState() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.error_outline,
-              size: 64,
-              color: Theme.of(context).colorScheme.error,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              _errorMessage ?? 'Failed to load product',
-              textAlign: TextAlign.center,
-              style: Theme.of(
-                context,
-              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w500),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Please check your connection and try again.',
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: Theme.of(context).hintColor,
-              ),
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: _loadProduct,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Try Again'),
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 24,
-                  vertical: 12,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+    return NetworkErrorState(onRetry: _loadProduct);
   }
 
   @override

@@ -4,7 +4,6 @@ import 'package:provider/provider.dart';
 import 'package:juvapay/services/supabase_auth_service.dart';
 import 'package:juvapay/services/task_service.dart';
 import '../../view_models/home_view_model.dart';
-import '../../view_models/wallet_view_model.dart';
 import '../../services/wallet_service.dart';
 import '../../widgets/offline_indicator.dart';
 import '../../services/cache_service.dart';
@@ -24,6 +23,7 @@ class HomeView extends StatelessWidget {
   const HomeView({super.key});
   static final SupabaseAuthService _authService = SupabaseAuthService();
   static final TaskService _taskService = TaskService();
+  static final WalletService _walletService = WalletService();
 
   @override
   Widget build(BuildContext context) {
@@ -43,77 +43,100 @@ class HomeView extends StatelessWidget {
               ),
         ),
       ],
-      child: Consumer2<HomeViewModel, WalletViewModel>(
-        builder: (context, viewModel, walletViewModel, child) {
+      child: Consumer<HomeViewModel>(
+        builder: (context, viewModel, child) {
           if (viewModel.isLoading) {
             return const Scaffold(
               body: Center(child: CircularProgressIndicator()),
             );
           }
 
-          // Get wallet data properly
-          final wallet = viewModel.walletAsMap;
-          final currentBalance = wallet['balance'] ?? 0.0;
-          final totalEarned = wallet['totalEarned'] ?? 0.0;
-          final lockedBalance = wallet['locked_balance'] ?? 0.0;
-          final totalSpent = wallet['total_spent'] ?? 0.0;
-          final formattedBalance = wallet['formattedBalance'] ?? '₦0.00';
-          final formattedAvailableBalance =
-              wallet['formattedAvailableBalance'] ?? '₦0.00';
+          final walletMap = viewModel.walletAsMap;
+          double toDouble(dynamic value) {
+            if (value is num) return value.toDouble();
+            return 0.0;
+          }
 
-          return Scaffold(
-            backgroundColor: theme.scaffoldBackgroundColor,
-            appBar: _buildAppBar(context, viewModel, primaryPurple),
-            body: Column(
-              children: [
-                OfflineIndicator(),
-                Expanded(
-                  child: RefreshIndicator(
-                    onRefresh: () async => await viewModel.refreshAll(),
-                    child: SingleChildScrollView(
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _buildBalanceSection(
-                            context,
-                            viewModel,
-                            currentBalance,
-                            formattedBalance,
-                            primaryPurple,
-                          ),
-                          _buildStatsRow(
-                            context,
-                            totalEarned,
-                            lockedBalance,
-                            totalSpent,
-                          ),
-                          Divider(thickness: 8, color: dividerColor),
-                          _buildWelcomeSection(
-                            context,
-                            viewModel,
-                            primaryPurple,
-                          ),
-                          Divider(thickness: 8, color: dividerColor),
+          return StreamBuilder<Wallet>(
+            stream: _walletService.watchWallet(),
+            builder: (context, walletSnapshot) {
+              final realtimeWallet = walletSnapshot.data;
+              final currentBalance =
+                  realtimeWallet?.currentBalance ??
+                  toDouble(walletMap['balance']);
+              final totalEarned =
+                  realtimeWallet?.totalEarned ??
+                  toDouble(walletMap['totalEarned']);
+              final lockedBalance =
+                  realtimeWallet?.lockedBalance ??
+                  toDouble(walletMap['locked_balance']);
+              final totalSpent =
+                  realtimeWallet?.totalSpent ??
+                  toDouble(walletMap['total_spent']);
+              final formattedBalance =
+                  realtimeWallet?.formattedBalance ??
+                  walletMap['formattedBalance']?.toString() ??
+                  '₦0.00';
+              final formattedAvailableBalance =
+                  realtimeWallet?.formattedAvailableBalance ??
+                  walletMap['formattedAvailableBalance']?.toString() ??
+                  '₦0.00';
 
-                          // Show available tasks only for members
-                          if (viewModel.isMember)
-                            _buildAvailableTasksSection(context, viewModel),
+              return Scaffold(
+                backgroundColor: theme.scaffoldBackgroundColor,
+                appBar: _buildAppBar(context, viewModel, primaryPurple),
+                body: Column(
+                  children: [
+                    OfflineIndicator(),
+                    Expanded(
+                      child: RefreshIndicator(
+                        onRefresh: () async => await viewModel.refreshAll(),
+                        child: SingleChildScrollView(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _buildBalanceSection(
+                                context,
+                                viewModel,
+                                currentBalance,
+                                formattedBalance,
+                                primaryPurple,
+                              ),
+                              _buildStatsRow(
+                                context,
+                                totalEarned,
+                                lockedBalance,
+                                totalSpent,
+                              ),
+                              Divider(thickness: 8, color: dividerColor),
+                              _buildWelcomeSection(
+                                context,
+                                viewModel,
+                                primaryPurple,
+                              ),
+                              Divider(thickness: 8, color: dividerColor),
 
-                          Divider(thickness: 8, color: dividerColor),
-                          _buildRecentTransactionsSection(
-                            context,
-                            viewModel,
-                            formattedAvailableBalance,
+                              // Show available tasks only for members
+                              if (viewModel.isMember)
+                                _buildAvailableTasksSection(context, viewModel),
+
+                              Divider(thickness: 8, color: dividerColor),
+                              _buildRecentTransactionsSection(
+                                context,
+                                viewModel,
+                                formattedAvailableBalance,
+                              ),
+                              const SizedBox(height: 40),
+                            ],
                           ),
-                          const SizedBox(height: 40),
-                        ],
+                        ),
                       ),
                     ),
-                  ),
+                  ],
                 ),
-              ],
-            ),
+              );
+            },
           );
         },
       ),

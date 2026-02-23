@@ -14,6 +14,7 @@ import 'subpages/update_password_view.dart';
 import 'subpages/update_location_view.dart';
 import 'subpages/update_bank_details_view.dart';
 import 'subpages/place_withdrawal_view.dart';
+import 'subpages/wallet_transfer_view.dart';
 import 'subpages/notifications/notifications_screen.dart';
 import 'subpages/privacy_policy_view.dart';
 import 'subpages/about_view.dart';
@@ -26,8 +27,9 @@ class MoreView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ChangeNotifierProvider(
-      create: (context) =>
-          MoreViewModel(Provider.of<ThemeService>(context, listen: false)),
+      create:
+          (context) =>
+              MoreViewModel(Provider.of<ThemeService>(context, listen: false)),
       child: Consumer<MoreViewModel>(
         builder: (context, viewModel, child) {
           final theme = Theme.of(context);
@@ -52,31 +54,37 @@ class MoreView extends StatelessWidget {
                     bottom: 8,
                   ),
                   child: TextButton(
-                    onPressed: viewModel.isLoading ? null : () => viewModel.logout(context),
+                    onPressed:
+                        viewModel.isLoading
+                            ? null
+                            : () => viewModel.logout(context),
                     style: TextButton.styleFrom(
-                      backgroundColor: isDark
-                          ? Colors.red.withOpacity(0.2)
-                          : Colors.red.shade50,
-                      foregroundColor: isDark ? Colors.red.shade300 : Colors.red.shade600,
+                      backgroundColor:
+                          isDark
+                              ? Colors.red.withOpacity(0.2)
+                              : Colors.red.shade50,
+                      foregroundColor:
+                          isDark ? Colors.red.shade300 : Colors.red.shade600,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
                       ),
                     ),
-                    child: viewModel.isLoading
-                        ? const SizedBox(
-                            height: 16,
-                            width: 16,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              valueColor: AlwaysStoppedAnimation<Color>(
-                                Colors.red,
+                    child:
+                        viewModel.isLoading
+                            ? const SizedBox(
+                              height: 16,
+                              width: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                  Colors.red,
+                                ),
                               ),
+                            )
+                            : const Text(
+                              'Logout',
+                              style: TextStyle(fontWeight: FontWeight.bold),
                             ),
-                          )
-                        : const Text(
-                            'Logout',
-                            style: TextStyle(fontWeight: FontWeight.bold),
-                          ),
                   ),
                 ),
               ],
@@ -89,7 +97,11 @@ class MoreView extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     _buildProfileHeader(context, viewModel),
-                    Divider(height: 32, thickness: 1, color: theme.dividerColor),
+                    Divider(
+                      height: 32,
+                      thickness: 1,
+                      color: theme.dividerColor,
+                    ),
 
                     _buildSectionTitle(context, 'Account & Finance'),
                     _buildListItem(
@@ -103,6 +115,12 @@ class MoreView extends StatelessWidget {
                       icon: Icons.account_balance_wallet_outlined,
                       title: 'Fund Wallet',
                       targetView: const FundWalletScreen(),
+                    ),
+                    _buildListItem(
+                      context,
+                      icon: Icons.swap_horiz,
+                      title: 'Wallet Transfer',
+                      targetView: const WalletTransferView(),
                     ),
                     _buildListItem(
                       context,
@@ -231,23 +249,25 @@ class MoreView extends StatelessWidget {
                   CircleAvatar(
                     radius: 35,
                     backgroundColor: theme.primaryColor.withOpacity(0.1),
-                    backgroundImage: (viewModel.profileUrl != null &&
-                            viewModel.profileUrl!.isNotEmpty)
-                        ? NetworkImage(viewModel.profileUrl!)
-                        : null,
-                    child: (viewModel.profileUrl == null ||
-                            viewModel.profileUrl!.isEmpty)
-                        ? Text(
-                            viewModel.fullName.isNotEmpty
-                                ? viewModel.fullName[0].toUpperCase()
-                                : 'U',
-                            style: TextStyle(
-                              color: theme.primaryColor,
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          )
-                        : null,
+                    backgroundImage:
+                        (viewModel.profileUrl != null &&
+                                viewModel.profileUrl!.isNotEmpty)
+                            ? NetworkImage(viewModel.profileUrl!)
+                            : null,
+                    child:
+                        (viewModel.profileUrl == null ||
+                                viewModel.profileUrl!.isEmpty)
+                            ? Text(
+                              viewModel.fullName.isNotEmpty
+                                  ? viewModel.fullName[0].toUpperCase()
+                                  : 'U',
+                              style: TextStyle(
+                                color: theme.primaryColor,
+                                fontSize: 24,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            )
+                            : null,
                   ),
                   if (!isProfileComplete)
                     Positioned(
@@ -292,7 +312,9 @@ class MoreView extends StatelessWidget {
                       viewModel.email,
                       style: TextStyle(
                         fontSize: 12,
-                        color: theme.textTheme.bodySmall?.color?.withOpacity(0.7),
+                        color: theme.textTheme.bodySmall?.color?.withOpacity(
+                          0.7,
+                        ),
                       ),
                     ),
                     if (viewModel.isMember)
@@ -329,11 +351,12 @@ class MoreView extends StatelessWidget {
             children: [
               Expanded(
                 child: ElevatedButton(
-                  onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => const EditProfileView(),
-                    ),
-                  ),
+                  onPressed:
+                      () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const EditProfileView(),
+                        ),
+                      ),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: theme.primaryColor,
                     foregroundColor: Colors.white,
@@ -370,7 +393,7 @@ class MoreView extends StatelessWidget {
 
   Widget _buildMembershipStatus(BuildContext context, MoreViewModel viewModel) {
     final theme = Theme.of(context);
-    
+
     return Padding(
       padding: const EdgeInsets.all(16.0),
       child: Container(
@@ -450,7 +473,10 @@ class MoreView extends StatelessWidget {
         size: 14,
         color: theme.disabledColor,
       ),
-      onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => targetView)),
+      onTap:
+          () => Navigator.of(
+            context,
+          ).push(MaterialPageRoute(builder: (_) => targetView)),
     );
   }
 
@@ -583,11 +609,12 @@ class MoreView extends StatelessWidget {
               ),
             if (percentage < 1.0)
               TextButton(
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => const EditProfileView(),
-                  ),
-                ),
+                onPressed:
+                    () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const EditProfileView(),
+                      ),
+                    ),
                 style: TextButton.styleFrom(
                   padding: EdgeInsets.zero,
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,

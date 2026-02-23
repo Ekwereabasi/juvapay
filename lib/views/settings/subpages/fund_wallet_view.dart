@@ -4,7 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:flutterwave_standard/flutterwave.dart';
 import 'package:uuid/uuid.dart';
 import 'package:lottie/lottie.dart';
-
+import 'package:hive/hive.dart';
 
 import '../../../services/wallet_service.dart';
 import '../../../services/supabase_auth_service.dart';
@@ -18,6 +18,12 @@ class FundWalletScreen extends StatefulWidget {
 }
 
 class _FundWalletScreenState extends State<FundWalletScreen> {
+  static const double _minDepositAmount = 100;
+  static const double _maxDepositAmount = 500000;
+  static const String _cacheBoxName = 'fund_wallet_cache_box';
+  static const String _walletCacheKey = 'fund_wallet_wallet_data';
+  static const String _historyCacheKey = 'fund_wallet_history_data';
+
   final WalletService _walletService = WalletService();
   final SupabaseAuthService _authService = SupabaseAuthService();
   final TextEditingController _amountController = TextEditingController();
@@ -45,7 +51,9 @@ class _FundWalletScreenState extends State<FundWalletScreen> {
   @override
   void initState() {
     super.initState();
-    _initializeData();
+    _walletFuture = Future.value(_emptyWallet());
+    _historyFuture = Future.value(const <Transaction>[]);
+    _loadCacheThenRefresh();
   }
 
   @override
@@ -55,14 +63,156 @@ class _FundWalletScreenState extends State<FundWalletScreen> {
     super.dispose();
   }
 
-  void _initializeData() {
-    setState(() {
-      _walletFuture = _walletService.getWallet();
-      _historyFuture = _walletService.getTransactionHistory(
-        types: ['DEPOSIT'],
-        limit: 10,
+  Wallet _emptyWallet() {
+    final now = DateTime.now();
+    return Wallet(
+      userId: '',
+      currentBalance: 0.0,
+      availableBalance: 0.0,
+      lockedBalance: 0.0,
+      totalEarned: 0.0,
+      totalDeposited: 0.0,
+      totalWithdrawn: 0.0,
+      totalSpent: 0.0,
+      status: 'ACTIVE',
+      createdAt: now,
+      updatedAt: now,
+    );
+  }
+
+  Future<Box<dynamic>> _openCacheBox() async {
+    if (Hive.isBoxOpen(_cacheBoxName)) {
+      return Hive.box<dynamic>(_cacheBoxName);
+    }
+    return Hive.openBox<dynamic>(_cacheBoxName);
+  }
+
+  Map<String, dynamic> _walletToCacheMap(Wallet wallet) {
+    return {
+      'user_id': wallet.userId,
+      'current_balance': wallet.currentBalance,
+      'available_balance': wallet.availableBalance,
+      'locked_balance': wallet.lockedBalance,
+      'total_earned': wallet.totalEarned,
+      'total_deposited': wallet.totalDeposited,
+      'total_withdrawn': wallet.totalWithdrawn,
+      'total_spent': wallet.totalSpent,
+      'status': wallet.status,
+      'last_transaction_at': wallet.lastTransactionAt?.toIso8601String(),
+      'created_at': wallet.createdAt.toIso8601String(),
+      'updated_at': wallet.updatedAt.toIso8601String(),
+      'is_locked': wallet.isLocked,
+      'lock_reason': wallet.lockReason,
+      'lock_description': wallet.lockDescription,
+      'lock_expires_at': wallet.lockExpiresAt?.toIso8601String(),
+    };
+  }
+
+  Map<String, dynamic> _transactionToCacheMap(Transaction tx) {
+    return {
+      'id': tx.id,
+      'user_id': tx.userId,
+      'amount': tx.amount,
+      'transaction_type': tx.type,
+      'status': tx.status,
+      'description': tx.description,
+      'reference_id': tx.referenceId,
+      'external_reference_id': tx.externalReferenceId,
+      'source_wallet_id': tx.sourceWalletId,
+      'destination_wallet_id': tx.destinationWalletId,
+      'order_id': tx.orderId,
+      'metadata': tx.metadata,
+      'gateway_response': tx.gatewayResponse,
+      'ip_address': tx.ipAddress,
+      'user_agent': tx.userAgent,
+      'device_id': tx.deviceId,
+      'location': tx.location,
+      'risk_score': tx.riskScore,
+      'fee': tx.fee,
+      'net_amount': tx.netAmount,
+      'created_at': tx.createdAt.toIso8601String(),
+      'updated_at': tx.updatedAt.toIso8601String(),
+      'completed_at': tx.completedAt?.toIso8601String(),
+      'failed_at': tx.failedAt?.toIso8601String(),
+    };
+  }
+
+  Future<void> _cachePageData(Wallet wallet, List<Transaction> history) async {
+    try {
+      final box = await _openCacheBox();
+      await box.put(_walletCacheKey, _walletToCacheMap(wallet));
+      await box.put(
+        _historyCacheKey,
+        history.map(_transactionToCacheMap).toList(growable: false),
       );
-    });
+    } catch (e) {
+      debugPrint('Fund wallet cache write error: $e');
+    }
+  }
+
+  Future<void> _loadCachedData() async {
+    try {
+      final box = await _openCacheBox();
+      final cachedWalletRaw = box.get(_walletCacheKey);
+      final cachedHistoryRaw = box.get(_historyCacheKey);
+
+      Wallet? cachedWallet;
+      List<Transaction> cachedHistory = const <Transaction>[];
+
+      if (cachedWalletRaw is Map) {
+        cachedWallet = Wallet.fromJson(
+          Map<String, dynamic>.from(cachedWalletRaw),
+        );
+      }
+
+      if (cachedHistoryRaw is List) {
+        cachedHistory = cachedHistoryRaw
+            .whereType<Map>()
+            .map(
+              (item) => Transaction.fromJson(Map<String, dynamic>.from(item)),
+            )
+            .toList(growable: false);
+      }
+
+      if (!mounted) return;
+      setState(() {
+        if (cachedWallet != null) {
+          _walletFuture = Future.value(cachedWallet);
+        }
+        _historyFuture = Future.value(cachedHistory);
+      });
+    } catch (e) {
+      debugPrint('Fund wallet cache read error: $e');
+    }
+  }
+
+  Future<void> _loadCacheThenRefresh() async {
+    await _loadCachedData();
+    await _initializeData();
+  }
+
+  Future<void> _initializeData() async {
+    final walletFuture = _walletService.getWallet();
+    final historyFuture = _walletService.getTransactionHistory(
+      types: ['DEPOSIT'],
+      limit: 10,
+    );
+
+    if (mounted) {
+      setState(() {
+        _walletFuture = walletFuture;
+        _historyFuture = historyFuture;
+      });
+    }
+
+    try {
+      final results = await Future.wait<dynamic>([walletFuture, historyFuture]);
+      final wallet = results[0] as Wallet;
+      final history = results[1] as List<Transaction>;
+      await _cachePageData(wallet, history);
+    } catch (e) {
+      debugPrint('Fund wallet refresh/cache sync error: $e');
+    }
   }
 
   void _setQuickAmount(double amount) {
@@ -82,13 +232,19 @@ class _FundWalletScreenState extends State<FundWalletScreen> {
     final amount = double.tryParse(_amountController.text.trim());
 
     // Validation
-    if (amount == null || amount < 100) {
-      _showSnackBar('Minimum deposit is ₦100', true);
+    if (amount == null || amount < _minDepositAmount) {
+      _showSnackBar(
+        'Minimum deposit is ₦${_minDepositAmount.toStringAsFixed(0)}',
+        true,
+      );
       return;
     }
 
-    if (amount > 1000000) {
-      _showSnackBar('Maximum deposit is ₦1,000,000', true);
+    if (amount > _maxDepositAmount) {
+      _showSnackBar(
+        'Maximum deposit is ₦${NumberFormat("#,##0").format(_maxDepositAmount)}',
+        true,
+      );
       return;
     }
 
@@ -126,7 +282,8 @@ class _FundWalletScreenState extends State<FundWalletScreen> {
         customization: Customization(
           title: 'Fund Wallet',
           description: 'Wallet top-up',
-          logo: 'https://hdaxtvyvrnqhoghzfixx.supabase.co/storage/v1/object/public/assest/logo.png',
+          logo:
+              'https://hdaxtvyvrnqhoghzfixx.supabase.co/storage/v1/object/public/assest/logo.png',
         ),
       );
 
@@ -166,6 +323,7 @@ class _FundWalletScreenState extends State<FundWalletScreen> {
         ipAddress: txContext.ipAddress,
         userAgent: txContext.userAgent,
         deviceId: txContext.deviceId,
+        location: txContext.location,
       );
 
       debugPrint('Deposit Result: $depositResult');
@@ -242,13 +400,12 @@ class _FundWalletScreenState extends State<FundWalletScreen> {
     }
   }
 
- Future<void> _refreshAndShowSuccess(Map<String, dynamic> result) async {
-    // Refresh data - remove await since _initializeData() doesn't return a Future
-    _initializeData(); // No await needed
+  Future<void> _refreshAndShowSuccess(Map<String, dynamic> result) async {
+    // Refresh page data and update cache
+    await _initializeData();
 
     // Show success message
     final currentBalance = result['currentBalance'] as double? ?? 0.0;
-    final availableBalance = result['availableBalance'] as double? ?? 0.0;
 
     _showSnackBar(
       'Payment successful! Current balance: ${_currencyFormat.format(currentBalance)}',
@@ -509,7 +666,7 @@ class _FundWalletScreenState extends State<FundWalletScreen> {
                     ),
                     const SizedBox(width: 6),
                     Text(
-                      'Min: ₦100 • Max: ₦1,000,000',
+                      'Min: ₦100 • Max: ₦500,000',
                       style: TextStyle(
                         color: Colors.white.withOpacity(0.9),
                         fontSize: 12,

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:juvapay/utils/network_messages.dart';
 
 /// A widget to display when there's an error
 class ErrorState extends StatelessWidget {
@@ -181,10 +182,8 @@ class NetworkErrorState extends StatelessWidget {
   Widget build(BuildContext context) {
     return ErrorState(
       icon: Icons.wifi_off,
-      title: 'Network Error',
-      message:
-          customMessage ??
-          'Unable to connect to the server. Please check your internet connection and try again.',
+      title: "This page couldn't load",
+      message: customMessage ?? NetworkMessages.pageLoadFailed,
       actionText: 'Retry',
       onAction: onRetry,
       iconColor: Colors.orange,
@@ -260,7 +259,8 @@ class PermissionErrorState extends StatelessWidget {
     return ErrorState(
       icon: Icons.security_outlined,
       title: 'Permission Required',
-      message: customMessage ??
+      message:
+          customMessage ??
           'This feature requires ${permissionName ?? 'additional'} permission to work properly.',
       actionText: 'Grant Permission',
       onAction: onGrantPermission,

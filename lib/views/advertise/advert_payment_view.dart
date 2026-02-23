@@ -656,8 +656,12 @@ class _AdvertPaymentViewState extends State<AdvertPaymentView> {
                             ? theme.primaryColor
                             : Colors.grey,
                         padding: const EdgeInsets.symmetric(
-                          horizontal: 30,
-                          vertical: 15,
+                          horizontal: 20,
+                          vertical: 10,
+                        ),
+                        textStyle: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
                         ),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(5),
@@ -678,7 +682,8 @@ class _AdvertPaymentViewState extends State<AdvertPaymentView> {
                                   : "INSUFFICIENT BALANCE",
                               style: const TextStyle(
                                 color: Colors.white,
-                                fontWeight: FontWeight.bold,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 12,
                               ),
                             ),
                     ),

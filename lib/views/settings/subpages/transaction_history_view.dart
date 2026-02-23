@@ -4,6 +4,18 @@ import 'package:provider/provider.dart';
 import '../../../services/wallet_service.dart';
 import 'package:juvapay/view_models/wallet_view_model.dart';
 
+class _SummaryTotals {
+  final double income;
+  final double expenses;
+  final double net;
+
+  const _SummaryTotals({
+    required this.income,
+    required this.expenses,
+    required this.net,
+  });
+}
+
 class TransactionHistoryPage extends StatefulWidget {
   const TransactionHistoryPage({Key? key}) : super(key: key);
 
@@ -52,6 +64,25 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
   void dispose() {
     _searchController.dispose();
     super.dispose();
+  }
+
+  _SummaryTotals _calculateSummaryTotals(List<Transaction> transactions) {
+    double income = 0;
+    double expenses = 0;
+
+    for (final transaction in transactions) {
+      if (transaction.isCredit) {
+        income += transaction.amount;
+      } else if (transaction.isDebit) {
+        expenses += transaction.amount;
+      }
+    }
+
+    return _SummaryTotals(
+      income: income,
+      expenses: expenses,
+      net: income - expenses,
+    );
   }
 
   List<String> _getTransactionTypesFromFilter(String filter) {
@@ -146,10 +177,7 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
     }).toList();
   }
 
-  Widget _buildSummaryCard(WalletViewModel walletViewModel) {
-    final stats = walletViewModel.dashboardStats;
-    if (stats == null) return const SizedBox();
-
+  Widget _buildSummaryCard(_SummaryTotals totals) {
     return Container(
       color: Colors.grey[50],
       child: SingleChildScrollView(
@@ -158,21 +186,21 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
           children: [
             _buildStatCard(
               'Total Income',
-              '₦${stats.month.totalIncome.toStringAsFixed(2)}',
+              '₦${totals.income.toStringAsFixed(2)}',
               Colors.green,
               Icons.arrow_upward,
             ),
             _buildStatCard(
               'Total Expenses',
-              '₦${stats.month.totalExpenses.toStringAsFixed(2)}',
+              '₦${totals.expenses.toStringAsFixed(2)}',
               Colors.red,
               Icons.arrow_downward,
             ),
             _buildStatCard(
               'Net Flow',
-              '₦${stats.month.netChange.toStringAsFixed(2)}',
-              stats.month.netChange >= 0 ? Colors.green : Colors.red,
-              stats.month.netChange >= 0
+              '₦${totals.net.toStringAsFixed(2)}',
+              totals.net >= 0 ? Colors.green : Colors.red,
+              totals.net >= 0
                   ? Icons.trending_up
                   : Icons.trending_down,
             ),
@@ -799,7 +827,9 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
           return Column(
             children: [
               // Summary Cards
-              _buildSummaryCard(walletViewModel),
+              _buildSummaryCard(
+                _calculateSummaryTotals(filteredTransactions),
+              ),
 
               // Search Bar
               Padding(

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:juvapay/utils/network_messages.dart';
 
 /// A widget to display when there's no data
 class EmptyState extends StatelessWidget {
@@ -175,10 +176,8 @@ class NoInternetEmptyState extends StatelessWidget {
   Widget build(BuildContext context) {
     return EmptyState(
       icon: Icons.wifi_off_outlined,
-      title: 'No Internet Connection',
-      message:
-          customMessage ??
-          'Please check your internet connection and try again.',
+      title: "This page couldn't load",
+      message: customMessage ?? NetworkMessages.pageLoadFailed,
       actionText: 'Try Again',
       onAction: onRetry,
       iconColor: Colors.orange,

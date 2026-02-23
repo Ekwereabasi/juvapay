@@ -243,6 +243,7 @@ class WalletViewModel extends ChangeNotifier {
     String? ipAddress,
     String? userAgent,
     String? deviceId,
+    Map<String, dynamic>? location,
   }) async {
     try {
       final txContext =
@@ -256,6 +257,7 @@ class WalletViewModel extends ChangeNotifier {
         ipAddress: ipAddress ?? txContext?.ipAddress,
         userAgent: userAgent ?? txContext?.userAgent,
         deviceId: deviceId ?? txContext?.deviceId,
+        location: location ?? txContext?.location,
       );
 
       // Refresh wallet data after successful deposit
@@ -367,6 +369,7 @@ class WalletViewModel extends ChangeNotifier {
     String description = 'Wallet transfer',
     String? ipAddress,
     String? userAgent,
+    Map<String, dynamic>? location,
   }) async {
     try {
       final txContext =
@@ -379,6 +382,7 @@ class WalletViewModel extends ChangeNotifier {
         description: description,
         ipAddress: ipAddress ?? txContext?.ipAddress,
         userAgent: userAgent ?? txContext?.userAgent,
+        location: location ?? txContext?.location,
       );
 
       // Refresh wallet data after successful transfer

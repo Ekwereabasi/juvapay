@@ -102,7 +102,8 @@ class Wallet {
   }
 
   String get formattedBalance => '₦${currentBalance.toStringAsFixed(2)}';
-  String get formattedAvailableBalance => '₦${availableBalance.toStringAsFixed(2)}';
+  String get formattedAvailableBalance =>
+      '₦${availableBalance.toStringAsFixed(2)}';
 }
 
 class Transaction {
@@ -208,19 +209,23 @@ class Transaction {
       netAmount: (json['net_amount'] as num).toDouble(),
       createdAt: parseTimestamp(json['created_at']),
       updatedAt: parseTimestamp(json['updated_at']),
-      completedAt: json['completed_at'] != null 
-          ? parseTimestamp(json['completed_at'])
-          : null,
-      failedAt: json['failed_at'] != null 
-          ? parseTimestamp(json['failed_at'])
-          : null,
+      completedAt:
+          json['completed_at'] != null
+              ? parseTimestamp(json['completed_at'])
+              : null,
+      failedAt:
+          json['failed_at'] != null ? parseTimestamp(json['failed_at']) : null,
     );
   }
 
   String get formattedDate {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    final transactionDay = DateTime(createdAt.year, createdAt.month, createdAt.day);
+    final transactionDay = DateTime(
+      createdAt.year,
+      createdAt.month,
+      createdAt.day,
+    );
 
     if (transactionDay == today) {
       return 'Today';
@@ -231,10 +236,23 @@ class Transaction {
   }
 
   String get formattedTime => DateFormat('h:mm a').format(createdAt);
-  
-  bool get isCredit => ['DEPOSIT', 'TASK_EARNING', 'REFUND', 'TRANSFER_IN', 'BONUS'].contains(type);
-  bool get isDebit => ['WITHDRAWAL', 'ORDER_PAYMENT', 'ADVERT_FEE', 'MEMBERSHIP_PAYMENT', 'TRANSFER_OUT', 'FEE'].contains(type);
-  
+
+  bool get isCredit => [
+    'DEPOSIT',
+    'TASK_EARNING',
+    'REFUND',
+    'TRANSFER_IN',
+    'BONUS',
+  ].contains(type);
+  bool get isDebit => [
+    'WITHDRAWAL',
+    'ORDER_PAYMENT',
+    'ADVERT_FEE',
+    'MEMBERSHIP_PAYMENT',
+    'TRANSFER_OUT',
+    'FEE',
+  ].contains(type);
+
   String get formattedAmount {
     final prefix = isCredit ? '+' : '-';
     return '$prefix₦${amount.toStringAsFixed(2)}';
@@ -318,10 +336,12 @@ class TransactionSummary {
       totalEarnings: (json['total_earnings'] as num?)?.toDouble() ?? 0.0,
       totalSpent: (json['total_spent'] as num?)?.toDouble() ?? 0.0,
       totalTransfersIn: (json['total_transfers_in'] as num?)?.toDouble() ?? 0.0,
-      totalTransfersOut: (json['total_transfers_out'] as num?)?.toDouble() ?? 0.0,
+      totalTransfersOut:
+          (json['total_transfers_out'] as num?)?.toDouble() ?? 0.0,
       totalRefunds: (json['total_refunds'] as num?)?.toDouble() ?? 0.0,
       transactionCount: (json['transaction_count'] as num?)?.toInt() ?? 0,
-      averageTransactionAmount: (json['average_transaction_amount'] as num?)?.toDouble() ?? 0.0,
+      averageTransactionAmount:
+          (json['average_transaction_amount'] as num?)?.toDouble() ?? 0.0,
     );
   }
 }
@@ -347,9 +367,10 @@ class DashboardStats {
       today: TransactionSummary.fromJson(json['today']),
       week: TransactionSummary.fromJson(json['week']),
       month: TransactionSummary.fromJson(json['month']),
-      recentTransactions: (json['recent_transactions'] as List<dynamic>)
-          .map((e) => Transaction.fromJson(e))
-          .toList(),
+      recentTransactions:
+          (json['recent_transactions'] as List<dynamic>)
+              .map((e) => Transaction.fromJson(e))
+              .toList(),
     );
   }
 }
@@ -361,7 +382,7 @@ class DashboardStats {
 class WalletService {
   final SupabaseClient _supabase = Supabase.instance.client;
   StreamSubscription? _walletSubscription;
-  
+
   // Flutterwave Configuration
   static const String _flutterwaveBaseUrl = 'https://api.flutterwave.com/v3';
   static const String _flutterwaveSecretKey = 'YOUR_FLUTTERWAVE_SECRET_KEY';
@@ -376,17 +397,18 @@ class WalletService {
     if (user == null) {
       throw Exception('User not authenticated');
     }
-    
+
     return _supabase
         .from('wallets')
         .stream(primaryKey: ['user_id'])
         .eq('user_id', user.id)
         .map((snapshot) {
-          if (snapshot.isEmpty) return {
-            'current_balance': 0.0, 
-            'available_balance': 0.0,
-            'locked_balance': 0.0
-          };
+          if (snapshot.isEmpty)
+            return {
+              'current_balance': 0.0,
+              'available_balance': 0.0,
+              'locked_balance': 0.0,
+            };
           final data = snapshot.first;
           return {
             'current_balance': (data['current_balance'] as num).toDouble(),
@@ -452,7 +474,7 @@ class WalletService {
     }
   }
 
-Future<Map<String, dynamic>> checkBalance(double requiredAmount) async {
+  Future<Map<String, dynamic>> checkBalance(double requiredAmount) async {
     final user = _supabase.auth.currentUser;
     if (user == null) throw Exception('User not authenticated');
 
@@ -502,7 +524,7 @@ Future<Map<String, dynamic>> checkBalance(double requiredAmount) async {
   // ==========================================
 
   // Check advert subscription status
-Future<Map<String, dynamic>> checkAdvertSubscription() async {
+  Future<Map<String, dynamic>> checkAdvertSubscription() async {
     try {
       final user = _supabase.auth.currentUser;
       if (user == null) throw Exception('User not authenticated');
@@ -528,13 +550,14 @@ Future<Map<String, dynamic>> checkAdvertSubscription() async {
       return {'has_subscription': false, 'is_active': false};
     }
   }
+
   // Process advert payment
-Future<Map<String, dynamic>> processAdvertPayment({
-  String? ipAddress,
-  String? userAgent,
-  String? deviceId,
-  Map<String, dynamic>? location,
-}) async {
+  Future<Map<String, dynamic>> processAdvertPayment({
+    String? ipAddress,
+    String? userAgent,
+    String? deviceId,
+    Map<String, dynamic>? location,
+  }) async {
     try {
       final user = _supabase.auth.currentUser;
       if (user == null) throw Exception('User not authenticated');
@@ -603,21 +626,27 @@ Future<Map<String, dynamic>> processAdvertPayment({
     String? ipAddress,
     String? userAgent,
     String? deviceId,
+    Map<String, dynamic>? location,
   }) async {
     final user = _supabase.auth.currentUser;
     if (user == null) throw Exception('User not authenticated');
+    final normalizedAmount = double.parse(amount.toStringAsFixed(2));
 
     try {
       final result = await _supabase
-          .rpc('process_deposit', params: {
-            'p_user_id': user.id,
-            'p_amount': amount,
-            'p_reference_id': referenceId,
-            'p_gateway_response': gatewayResponse,
-            'p_ip_address': ipAddress,
-            'p_user_agent': userAgent,
-            'p_device_id': deviceId,
-          })
+          .rpc(
+            'process_deposit',
+            params: {
+              'p_user_id': user.id,
+              'p_amount': normalizedAmount,
+              'p_reference_id': referenceId,
+              'p_gateway_response': gatewayResponse,
+              'p_ip_address': ipAddress,
+              'p_user_agent': userAgent,
+              'p_device_id': deviceId,
+              'p_location': location,
+            },
+          )
           .single()
           .timeout(const Duration(seconds: 30));
 
@@ -651,10 +680,14 @@ Future<Map<String, dynamic>> processAdvertPayment({
     }
   }
 
-  Future<Map<String, dynamic>> verifyFlutterwaveTransaction(String transactionId) async {
+  Future<Map<String, dynamic>> verifyFlutterwaveTransaction(
+    String transactionId,
+  ) async {
     try {
       // Verify with Flutterwave API
-      final url = Uri.parse('$_flutterwaveBaseUrl/transactions/$transactionId/verify');
+      final url = Uri.parse(
+        '$_flutterwaveBaseUrl/transactions/$transactionId/verify',
+      );
       final response = await http.get(
         url,
         headers: {
@@ -665,7 +698,8 @@ Future<Map<String, dynamic>> processAdvertPayment({
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        final flutterwaveStatus = data['data']['status']?.toString().toLowerCase();
+        final flutterwaveStatus =
+            data['data']['status']?.toString().toLowerCase();
         final reference = data['data']['tx_ref'];
 
         // Determine status based on Flutterwave response
@@ -716,11 +750,14 @@ Future<Map<String, dynamic>> processAdvertPayment({
   }) async {
     try {
       final result = await _supabase
-          .rpc('verify_transaction', params: {
-            'p_reference_id': referenceId,
-            'p_new_status': newStatus,
-            'p_updated_gateway_response': updatedGatewayResponse,
-          })
+          .rpc(
+            'verify_transaction',
+            params: {
+              'p_reference_id': referenceId,
+              'p_new_status': newStatus,
+              'p_updated_gateway_response': updatedGatewayResponse,
+            },
+          )
           .single()
           .timeout(const Duration(seconds: 10));
 
@@ -732,15 +769,9 @@ Future<Map<String, dynamic>> processAdvertPayment({
         'newStatus': result['new_status'],
       };
     } on TimeoutException {
-      return {
-        'success': false,
-        'message': 'Verification request timed out',
-      };
+      return {'success': false, 'message': 'Verification request timed out'};
     } catch (e) {
-      return {
-        'success': false,
-        'message': 'Failed to verify transaction: $e',
-      };
+      return {'success': false, 'message': 'Failed to verify transaction: $e'};
     }
   }
 
@@ -760,14 +791,17 @@ Future<Map<String, dynamic>> processAdvertPayment({
 
     try {
       final result = await _supabase
-          .rpc('process_withdrawal', params: {
-            'p_user_id': user.id,
-            'p_amount': amount,
-            'p_bank_details': bankDetails,
-            'p_description': description,
-            'p_ip_address': ipAddress,
-            'p_user_agent': userAgent,
-          })
+          .rpc(
+            'process_withdrawal',
+            params: {
+              'p_user_id': user.id,
+              'p_amount': amount,
+              'p_bank_details': bankDetails,
+              'p_description': description,
+              'p_ip_address': ipAddress,
+              'p_user_agent': userAgent,
+            },
+          )
           .single()
           .timeout(const Duration(seconds: 30));
 
@@ -801,7 +835,8 @@ Future<Map<String, dynamic>> processAdvertPayment({
 
   Future<Map<String, dynamic>> processPayment({
     required double amount,
-    required String transactionType, // 'ORDER_PAYMENT', 'ADVERT_FEE', 'MEMBERSHIP_PAYMENT', 'FEE'
+    required String
+    transactionType, // 'ORDER_PAYMENT', 'ADVERT_FEE', 'MEMBERSHIP_PAYMENT', 'FEE'
     required String description,
     String? referenceId,
     Map<String, dynamic>? metadata,
@@ -868,20 +903,26 @@ Future<Map<String, dynamic>> processAdvertPayment({
     String description = 'Wallet transfer',
     String? ipAddress,
     String? userAgent,
+    Map<String, dynamic>? location,
   }) async {
     final user = _supabase.auth.currentUser;
     if (user == null) throw Exception('User not authenticated');
+    final normalizedAmount = double.parse(amount.toStringAsFixed(2));
 
     try {
       final result = await _supabase
-          .rpc('transfer_between_wallets', params: {
-            'p_source_user_id': user.id,
-            'p_destination_user_id': destinationUserId,
-            'p_amount': amount,
-            'p_description': description,
-            'p_ip_address': ipAddress,
-            'p_user_agent': userAgent,
-          })
+          .rpc(
+            'transfer_between_wallets',
+            params: {
+              'p_source_user_id': user.id,
+              'p_destination_user_id': destinationUserId,
+              'p_amount': normalizedAmount,
+              'p_description': description,
+              'p_ip_address': ipAddress,
+              'p_user_agent': userAgent,
+              'p_location': location,
+            },
+          )
           .single()
           .timeout(const Duration(seconds: 30));
 
@@ -894,7 +935,11 @@ Future<Map<String, dynamic>> processAdvertPayment({
         'amountReceived': (result['amount_received'] as num?)?.toDouble(),
         'transferFee': (result['transfer_fee'] as num?)?.toDouble(),
         'sourceNewBalance': (result['source_new_balance'] as num?)?.toDouble(),
-        'sourceAvailableBalance': (result['source_available_balance'] as num?)?.toDouble(),
+        'sourceAvailableBalance':
+            (result['source_available_balance'] as num?)?.toDouble(),
+        'destNewBalance': (result['dest_new_balance'] as num?)?.toDouble(),
+        'destAvailableBalance':
+            (result['dest_available_balance'] as num?)?.toDouble(),
         'message': result['message'],
         'error': result['error'],
       };
@@ -913,6 +958,85 @@ Future<Map<String, dynamic>> processAdvertPayment({
     }
   }
 
+  Future<Map<String, dynamic>?> resolveTransferRecipient(
+    String recipientInput,
+  ) async {
+    final currentUser = _supabase.auth.currentUser;
+    if (currentUser == null) throw Exception('User not authenticated');
+
+    final raw = recipientInput.trim();
+    if (raw.isEmpty) return null;
+
+    final normalized = raw.startsWith('@') ? raw.substring(1) : raw;
+
+    try {
+      if (_isUuidFormat(normalized)) {
+        if (normalized == currentUser.id) {
+          return {'userId': normalized, 'isSelf': true};
+        }
+
+        try {
+          final profile =
+              await _supabase
+                  .from('profiles')
+                  .select('id, username, full_name')
+                  .eq('id', normalized)
+                  .maybeSingle();
+
+          if (profile != null) {
+            return {
+              'userId': normalized,
+              'username': profile['username']?.toString(),
+              'fullName': profile['full_name']?.toString(),
+              'isSelf': false,
+            };
+          }
+        } catch (_) {
+          // If profile lookup is blocked by RLS, we can still transfer by UUID.
+        }
+
+        return {'userId': normalized, 'isSelf': false};
+      }
+
+      final response =
+          await _supabase
+              .from('profiles')
+              .select('id, username, full_name')
+              .ilike('username', normalized)
+              .maybeSingle();
+
+      if (response == null) return null;
+
+      final userId = response['id']?.toString();
+      if (userId == null || userId.isEmpty) return null;
+      if (userId == currentUser.id) {
+        return {
+          'userId': userId,
+          'username': response['username']?.toString(),
+          'fullName': response['full_name']?.toString(),
+          'isSelf': true,
+        };
+      }
+
+      return {
+        'userId': userId,
+        'username': response['username']?.toString(),
+        'fullName': response['full_name']?.toString(),
+        'isSelf': false,
+      };
+    } catch (e) {
+      debugPrint('Error resolving transfer recipient: $e');
+      return null;
+    }
+  }
+
+  bool _isUuidFormat(String value) {
+    final uuidRegex = RegExp(
+      r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$',
+    );
+    return uuidRegex.hasMatch(value);
+  }
+
   // ==========================================
   // 8. REFUND OPERATIONS
   // ==========================================
@@ -925,12 +1049,15 @@ Future<Map<String, dynamic>> processAdvertPayment({
   }) async {
     try {
       final result = await _supabase
-          .rpc('process_refund', params: {
-            'p_original_transaction_id': originalTransactionId,
-            'p_refund_amount': refundAmount,
-            'p_reason': reason,
-            'p_processed_by': processedBy,
-          })
+          .rpc(
+            'process_refund',
+            params: {
+              'p_original_transaction_id': originalTransactionId,
+              'p_refund_amount': refundAmount,
+              'p_reason': reason,
+              'p_processed_by': processedBy,
+            },
+          )
           .single()
           .timeout(const Duration(seconds: 30));
 
@@ -983,7 +1110,9 @@ Future<Map<String, dynamic>> processAdvertPayment({
       // Apply filters using the filter() method (universal method)
       if (types != null && types.isNotEmpty) {
         // Build OR conditions for multiple types
-        final orConditions = types.map((type) => 'transaction_type.eq.$type').join(',');
+        final orConditions = types
+            .map((type) => 'transaction_type.eq.$type')
+            .join(',');
         query = query.or(orConditions);
       }
 
@@ -1006,9 +1135,8 @@ Future<Map<String, dynamic>> processAdvertPayment({
           .timeout(const Duration(seconds: 10));
 
       // Convert response to Transaction objects
-      final transactions = (response as List)
-          .map((item) => Transaction.fromJson(item))
-          .toList();
+      final transactions =
+          (response as List).map((item) => Transaction.fromJson(item)).toList();
 
       return transactions;
     } catch (e) {
@@ -1058,11 +1186,14 @@ Future<Map<String, dynamic>> processAdvertPayment({
 
     try {
       final result = await _supabase
-          .rpc('get_monthly_statistics', params: {
-            'p_user_id': user.id,
-            'p_start_date': startDate.toIso8601String(),
-            'p_end_date': endDate.toIso8601String(),
-          })
+          .rpc(
+            'get_monthly_statistics',
+            params: {
+              'p_user_id': user.id,
+              'p_start_date': startDate.toIso8601String(),
+              'p_end_date': endDate.toIso8601String(),
+            },
+          )
           .single()
           .timeout(const Duration(seconds: 10));
 
@@ -1114,13 +1245,16 @@ Future<Map<String, dynamic>> processAdvertPayment({
 
     try {
       final result = await _supabase
-          .rpc('get_wallet_statement', params: {
-            'p_user_id': user.id,
-            'p_start_date': startDate?.toIso8601String(),
-            'p_end_date': endDate?.toIso8601String(),
-            'p_limit': limit,
-            'p_offset': offset,
-          })
+          .rpc(
+            'get_wallet_statement',
+            params: {
+              'p_user_id': user.id,
+              'p_start_date': startDate?.toIso8601String(),
+              'p_end_date': endDate?.toIso8601String(),
+              'p_limit': limit,
+              'p_offset': offset,
+            },
+          )
           .single()
           .timeout(const Duration(seconds: 15));
 
@@ -1149,13 +1283,16 @@ Future<Map<String, dynamic>> processAdvertPayment({
   }) async {
     try {
       final result = await _supabase
-          .rpc('lock_wallet', params: {
-            'p_user_id': userId,
-            'p_reason': reason,
-            'p_description': description,
-            'p_locked_by': lockedBy,
-            'p_expires_at': expiresAt?.toIso8601String(),
-          })
+          .rpc(
+            'lock_wallet',
+            params: {
+              'p_user_id': userId,
+              'p_reason': reason,
+              'p_description': description,
+              'p_locked_by': lockedBy,
+              'p_expires_at': expiresAt?.toIso8601String(),
+            },
+          )
           .single()
           .timeout(const Duration(seconds: 10));
 
@@ -1181,11 +1318,14 @@ Future<Map<String, dynamic>> processAdvertPayment({
   }) async {
     try {
       final result = await _supabase
-          .rpc('unlock_wallet', params: {
-            'p_user_id': userId,
-            'p_unlock_reason': unlockReason,
-            'p_unlocked_by': unlockedBy,
-          })
+          .rpc(
+            'unlock_wallet',
+            params: {
+              'p_user_id': userId,
+              'p_unlock_reason': unlockReason,
+              'p_unlocked_by': unlockedBy,
+            },
+          )
           .single()
           .timeout(const Duration(seconds: 10));
 
@@ -1243,11 +1383,14 @@ Future<Map<String, dynamic>> processAdvertPayment({
   }) async {
     try {
       await _supabase
-          .rpc('cancel_transaction', params: {
-            'p_reference_id': referenceId,
-            'p_reason': reason,
-            'p_cancelled_by': cancelledBy,
-          })
+          .rpc(
+            'cancel_transaction',
+            params: {
+              'p_reference_id': referenceId,
+              'p_reason': reason,
+              'p_cancelled_by': cancelledBy,
+            },
+          )
           .single()
           .timeout(const Duration(seconds: 10));
     } catch (e) {

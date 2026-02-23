@@ -11,6 +11,7 @@ import 'package:lottie/lottie.dart';
 
 import '../../../../services/order_service.dart';
 import '../../../../services/wallet_service.dart';
+import '../../../../utils/network_messages.dart';
 import '../../../../utils/platform_helper.dart';
 import 'order_details_view.dart';
 
@@ -1104,7 +1105,7 @@ class _OrderHistoryViewState extends State<OrderHistoryView> {
             ),
             const SizedBox(height: 12),
             Text(
-              'Please check your internet connection and try again',
+              NetworkMessages.pageLoadFailed,
               textAlign: TextAlign.center,
               style: GoogleFonts.inter(
                 fontSize: 14,
@@ -1492,9 +1493,7 @@ class _OrderHistoryViewState extends State<OrderHistoryView> {
   }
 
   void _showOfflineError() {
-    _showError(
-      'You are currently offline. Please check your internet connection.',
-    );
+    _showError(NetworkMessages.pageLoadFailed);
   }
 
   void _showTimeoutError() {
@@ -1680,7 +1679,7 @@ class _OrderHistoryViewState extends State<OrderHistoryView> {
                             ? _buildLoadingState(theme)
                             : _retryLoading && _orders.isEmpty
                             ? _buildErrorState(
-                              'Failed to load orders. Please check your connection.',
+                              NetworkMessages.pageLoadFailed,
                               _loadInitialData,
                             )
                             : _orders.isEmpty

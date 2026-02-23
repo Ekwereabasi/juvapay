@@ -13,7 +13,6 @@ import 'package:juvapay/widgets/error_state.dart';
 import 'package:juvapay/views/market/marketplace_upload_page.dart';
 import 'package:juvapay/widgets/empty_state.dart'; // Add this line
 
-
 class MarketView extends StatefulWidget {
   const MarketView({super.key});
 
@@ -49,7 +48,7 @@ class _MarketViewState extends State<MarketView> {
   bool _loadingStates = false;
   bool _loadingLgas = false;
 
-@override
+  @override
   void initState() {
     super.initState();
     debugPrint('MarketView initState called');
@@ -539,7 +538,7 @@ class _MarketViewState extends State<MarketView> {
   }
 
   @override
-Widget build(BuildContext context) {
+  Widget build(BuildContext context) {
     return Scaffold(
       key: _scaffoldKey,
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -582,10 +581,7 @@ Widget build(BuildContext context) {
           _isLoading && _products.isEmpty
               ? const Center(child: LoadingIndicator())
               : _hasError && _products.isEmpty
-              ? NetworkErrorState(
-                onRetry: () => _loadProducts(refresh: true),
-                customMessage: _errorMessage ?? 'Failed to load products',
-              )
+              ? NetworkErrorState(onRetry: () => _loadProducts(refresh: true))
               : _products.isEmpty
               ? NoProductsEmptyState(
                 onAddProduct: () {
